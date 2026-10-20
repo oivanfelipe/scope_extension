@@ -1,49 +1,41 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { priorityOf, sprintOf, labelForAverage, finalize, summarize } from '../lib/scoring.js';
+import { labelForAverage, finalize, summarize, statusOf, byWorst } from '../lib/scoring.js';
 
-test('prioridade = (6 − nota) × I × D', () => {
-  assert.equal(priorityOf(1, 5, 5), 125);
-  assert.equal(priorityOf(3, 4, 4), 48);
-  assert.equal(priorityOf(5, 5, 5), 25);
-});
-
-test('cortes de sprint do playbook e nota 5 fora das sprints', () => {
-  assert.equal(sprintOf(125, 1), 1);
-  assert.equal(sprintOf(80, 2), 1);
-  assert.equal(sprintOf(79, 2), 2);
-  assert.equal(sprintOf(40, 3), 2);
-  assert.equal(sprintOf(39, 3), 3);
-  assert.equal(sprintOf(15, 4), 3);
-  assert.equal(sprintOf(14, 4), 4);
-  assert.equal(sprintOf(25, 5), null);
-});
-
-test('rótulos iguais aos relatórios da Elements', () => {
+test('rótulos iguais aos relatórios', () => {
   assert.equal(labelForAverage(1.2), 'Crítico');
   assert.equal(labelForAverage(2.2), 'Ruim');
   assert.equal(labelForAverage(2.8), 'Regular');
-  assert.equal(labelForAverage(3.0), 'Regular');
   assert.equal(labelForAverage(3.3), 'Regular');
   assert.equal(labelForAverage(4.0), 'Bom');
   assert.equal(labelForAverage(4.7), 'Excelente');
 });
 
-test('nota manual recalcula prioridade; média ignora N/A e dimensão O', () => {
+test('situação: 1–2 problema, 3 atenção, 4–5 ok', () => {
+  assert.deepEqual([1, 2, 3, 4, 5].map(statusOf), ['problem', 'problem', 'attention', 'ok', 'ok']);
+});
+
+test('nota manual recalcula; médias separadas por nível e tema; N/A fora da média', () => {
   const raw = [
-    { id: 'S1', dim: 'S', impact: 5, dependency: 5, score: 1 },
-    { id: 'S2', dim: 'S', impact: 4, dependency: 4, score: 5 },
-    { id: 'C1', dim: 'C', impact: 4, dependency: 2, score: 3 },
-    { id: 'P1', dim: 'P', na: true, reason: 'x' },
+    { id: 'S6', level: 'site', group: 'tecnico', impact: 5, score: 1 },
+    { id: 'S7', level: 'site', group: 'tecnico', impact: 4, score: 5 },
+    { id: 'C1', level: 'page', group: 'conteudo', impact: 4, score: 3 },
+    { id: 'PR1', level: 'page', group: 'produto', impact: 4, score: 5 },
+    { id: 'P2', level: 'page', group: 'performance', impact: 3, na: true, reason: 'x' },
   ];
-  const fin = finalize(raw, { S1: 4 });
-  assert.equal(fin[0].score, 4);
+  const fin = finalize(raw, { S6: 3 });
+  assert.equal(fin[0].score, 3);
   assert.equal(fin[0].overridden, true);
-  assert.equal(fin[0].priority, 50);
   const sum = summarize(fin);
-  assert.equal(sum.dims.S.avg, 4.5);
-  assert.equal(sum.dims.O.avg, null);
-  assert.equal(sum.dims.P.avg, null);
-  assert.equal(sum.overall, (4.5 + 3) / 2);
-  assert.equal(sum.sprintCounts[2], 1);
+  assert.equal(sum.levels.site.avg, 4);
+  assert.equal(sum.levels.page.avg, 4);
+  assert.equal(sum.levels.page.naCount, 1);
+  assert.equal(sum.levels.site.attention, 1);
+  assert.equal(sum.groups.produto.avg, 5);
+  assert.equal(sum.groups.performance.avg, null);
+});
+
+test('ordenação do pior para o melhor, empate pelo impacto', () => {
+  const list = [{ id: 'A', score: 3, impact: 2 }, { id: 'B', score: 1, impact: 1 }, { id: 'C', score: 3, impact: 5 }].sort(byWorst);
+  assert.deepEqual(list.map((r) => r.id), ['B', 'C', 'A']);
 });

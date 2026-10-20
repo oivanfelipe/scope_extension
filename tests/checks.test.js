@@ -55,6 +55,7 @@ const run = async (html, url, net, type) => {
   const { page, DOMParser } = await collectFromHtml(html, url);
   const ctx = buildContext(page, net, type, DOMParser);
   const res = Object.fromEntries(finalize(runChecks(ctx)).map((r) => [r.id, r]));
+  res.__all = finalize(runChecks(ctx));
   return { page, ctx, res };
 };
 
@@ -62,7 +63,6 @@ test('página problemática: pega noindex, canonical divergente, H1, schema × p
   const { res, ctx } = await run(BAD_PRODUCT, 'https://www.exemplo.com.br/products/astra', baseNet());
   assert.equal(ctx.pageType, 'product');
   assert.equal(res.S2.score, 1);
-  assert.equal(res.S2.sprint, 1);
   assert.equal(res.S3.score, 2);
   assert.equal(res.C1.score <= 3, true);
   assert.equal(res.C2.score, 2);
@@ -80,11 +80,11 @@ test('página saudável: notas altas e preço do schema visível', async () => {
   assert.equal(res.S1.score, 5);
   assert.equal(res.S5.score, 5);
   assert.equal(res.S6.score, 5);
-  assert.equal(res.E2.score >= 4, true, res.E2.evidence);
+  assert.equal(res.PR1.score >= 4, true, res.PR1.evidence);
   assert.equal(res.E5.score >= 4, true, res.E5.evidence);
   const sum = summarize(Object.values(res));
-  assert.equal(sum.dims.O.avg, null);
-  assert.ok(sum.overall > 3.5, `overall ${sum.overall}`);
+  assert.ok(sum.levels.page.avg > 3.5, `page avg ${sum.levels.page.avg}`);
+  assert.equal(sum.groups.produto.count >= 5, true);
 });
 
 test('domínio: várias versões acessíveis, robots bloqueando, sitemap com páginas de obrigado', async () => {
@@ -106,8 +106,8 @@ test('domínio: várias versões acessíveis, robots bloqueando, sitemap com pá
 
 test('checagens dependentes de contexto viram N/A em vez de nota', async () => {
   const { res } = await run('<html lang="pt"><head><title>Home da marca com título razoável</title></head><body><main><h1>Marca</h1></main></body></html>', 'https://marca.com.br/', baseNet());
-  assert.equal(res.C7.na, true);
-  assert.equal(res.E6.na, true);
+  assert.equal(res.C7, undefined, 'home não tem breadcrumb: item fora do tipo');
+  assert.equal(res.E6, undefined, 'autoria só para artigo');
   assert.equal(res.E3.na, true);
   assert.equal(res.C8.na, true);
   assert.equal(res.E9.na, true);
@@ -116,7 +116,7 @@ test('checagens dependentes de contexto viram N/A em vez de nota', async () => {
 
 test('rede indisponível não derruba a análise', async () => {
   const { res } = await run(GOOD_PRODUCT, 'https://www.exemplo.com.br/products/astra-pro', {});
-  for (const id of ['S1', 'S5', 'S6', 'S7', 'S8', 'P8']) assert.equal(res[id].na, true, id);
+  for (const id of ['S1', 'S5', 'S6', 'S7', 'S8', 'S9', 'P8']) assert.equal(res[id].na, true, id);
   assert.equal(res.C1.score, 5);
 });
 
@@ -135,4 +135,53 @@ test('robots: Shopify padrão (/cart.js, /cdn/wpm/*.js) não é falso positivo; 
   assert.equal(a.res.S6.score, 5, a.res.S6.evidence);
   const b = await run(GOOD_PRODUCT, 'https://www.exemplo.com.br/products/astra-pro', mk('User-agent: *\nDisallow: /wp-content/plugins/'));
   assert.equal(b.res.S6.score, 3, b.res.S6.evidence);
+});
+
+const SERVICE_PAGE = `<!doctype html><html lang="pt-BR"><head><title>Consultoria de SEO para e-commerce | Agência Exemplo</title>
+<meta name="description" content="Consultoria de SEO para e-commerce com diagnóstico técnico, plano de ação e acompanhamento mensal. Solicite um orçamento.">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"ProfessionalService","name":"Consultoria de SEO","description":"d","areaServed":"BR","serviceType":"SEO","provider":{"@type":"Organization","name":"Exemplo"}}</script>
+</head><body><main><h1>Consultoria de SEO para e-commerce</h1>
+<a href="#form" class="btn">Solicitar orçamento</a>
+<h2>O que está incluso</h2><p>${'entregáveis do serviço '.repeat(60)}</p>
+<h2>Como funciona</h2><p>Etapas do processo.</p><h2>Para quem é</h2><p>Lojas.</p><h2>Benefícios</h2><p>b</p>
+<h2>Depoimentos de clientes</h2><p>Mais de 10 anos de experiência. Nossa equipe de especialistas. Planos a partir de R$ 2.500.</p>
+<form id="form"><input name="nome"><input type="email" name="email"><textarea name="msg"></textarea><button>Enviar</button></form>
+<a href="https://wa.me/5511999999999">WhatsApp</a>
+</main></body></html>`;
+
+test('página de serviço é detectada e recebe checagens de serviço (e não as de produto)', async () => {
+  const { res, ctx } = await run(SERVICE_PAGE, 'https://www.exemplo.com.br/servicos/seo-ecommerce', baseNet());
+  assert.equal(ctx.pageType, 'service');
+  const ids = res.__all.map((r) => r.id);
+  assert.ok(ids.includes('SV1') && ids.includes('SV5'));
+  assert.ok(!ids.some((i) => i.startsWith('PR')), 'sem itens de produto');
+  assert.equal(res.SV1.score, 5, res.SV1.evidence);
+  assert.equal(res.SV2.score >= 4, true, res.SV2.evidence);
+  assert.equal(res.SV3.score, 5, res.SV3.evidence);
+  assert.equal(res.SV5.score, 5, res.SV5.evidence);
+  assert.equal(res.SV7.score, 5);
+  assert.equal(res.SV2.group, 'servico');
+  assert.equal(res.E2, undefined, 'schema de serviço é avaliado em SV1');
+});
+
+test('página de produto recebe itens de produto, não de serviço; níveis site × página', async () => {
+  const { res, ctx } = await run(GOOD_PRODUCT, 'https://www.exemplo.com.br/products/astra-pro', baseNet({ soft404: { status: 404 } }));
+  const ids = res.__all.map((r) => r.id);
+  assert.ok(ids.includes('PR1') && ids.includes('PR7'));
+  assert.ok(!ids.some((i) => i.startsWith('SV')));
+  assert.equal(res.PR1.score >= 4, true, res.PR1.evidence);
+  assert.equal(res.E3.group, 'produto', 'preço × schema aparece junto dos itens de produto');
+  const siteIds = res.__all.filter((r) => r.level === 'site').map((r) => r.id).sort();
+  assert.deepEqual(siteIds, ['E8', 'S5', 'S6', 'S7', 'S9']);
+  assert.equal(res.S9.score, 5);
+  assert.equal(res.S6.level, 'site');
+  assert.equal(res.C1.level, 'page');
+});
+
+test('soft 404: URL inexistente respondendo 200 é problema crítico', async () => {
+  const { res } = await run(GOOD_PRODUCT, 'https://www.exemplo.com.br/products/astra-pro', baseNet({ soft404: { status: 200, redirected: false, finalUrl: 'https://x/y' } }));
+  assert.equal(res.S9.score, 1);
+  const r2 = await run(GOOD_PRODUCT, 'https://www.exemplo.com.br/products/astra-pro', baseNet({ soft404: { status: 200, redirected: true, finalUrl: 'https://www.exemplo.com.br/' } }));
+  assert.equal(r2.res.S9.score, 2);
 });
