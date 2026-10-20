@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "S.C.O.P.E. · Análise prévia de SEO",
+  "short_name": "S.C.O.P.E.",
+  "version": "0.1.0",
+  "description": "Análise prévia de SEO estrutural pela metodologia S.C.O.P.E. da V4 Company. Notas de 1 a 5, prioridade por sprint e exportação para a proposta.",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "assets/icons/icon16.png",
+    "32": "assets/icons/icon32.png",
+    "48": "assets/icons/icon48.png",
+    "128": "assets/icons/icon128.png"
+  },
+  "action": {
+    "default_title": "S.C.O.P.E. · Analisar esta página",
+    "default_icon": {
+      "16": "assets/icons/icon16.png",
+      "32": "assets/icons/icon32.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "sidepanel/index.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": ["sidePanel", "scripting"],
+  "host_permissions": ["<all_urls>"]
+}
