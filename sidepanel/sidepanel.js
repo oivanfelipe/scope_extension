@@ -100,7 +100,7 @@ async function analyze() {
         ]);
         mark('robots', !net.robots.error);
       })(),
-      checkLinks(page.links.internal).then((r) => { net.links = r; mark('links'); }).catch((e) => { net.links = { error: String(e) }; mark('links', false); }),
+      checkLinks(page.links.internal.filter((l) => !/\/(cart|carrinho|checkout|account|conta|minha-conta|login|entrar|wishlist|lista-de-desejos|search|busca)(\/|$|\?)/i.test(new URL(l.href).pathname + new URL(l.href).search))).then((r) => { net.links = r; mark('links'); }).catch((e) => { net.links = { error: String(e) }; mark('links', false); }),
     ];
     await Promise.all(tasks);
     renderProgress(done, 'score', failed);

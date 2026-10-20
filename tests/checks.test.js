@@ -185,3 +185,44 @@ test('soft 404: URL inexistente respondendo 200 é problema crítico', async () 
   const r2 = await run(GOOD_PRODUCT, 'https://www.exemplo.com.br/products/astra-pro', baseNet({ soft404: { status: 200, redirected: true, finalUrl: 'https://www.exemplo.com.br/' } }));
   assert.equal(r2.res.S9.score, 2);
 });
+
+test('e-commerce: produto e categoria não recebem FAQ, NAP/local nem volume de texto de produto', async () => {
+  const prod = await run(GOOD_PRODUCT, 'https://www.exemplo.com.br/products/astra-pro', baseNet());
+  const ids = prod.res.__all.map((r) => r.id);
+  for (const id of ['E7', 'E9', 'C9']) assert.ok(!ids.includes(id), `${id} não faz sentido em página de produto`);
+  const catHtml = `<!doctype html><html lang="pt-BR"><head><title>Cadeiras ergonômicas para escritório | Loja</title>
+    <meta name="description" content="Veja nossas cadeiras ergonômicas com NR-17, garantia estendida e entrega para todo o Brasil. Compare modelos e escolha."><meta name="viewport" content="width=device-width">
+    <script type="application/ld+json">{"@type":"BreadcrumbList","itemListElement":[]}</script></head>
+    <body><main><h1>Cadeiras ergonômicas</h1><p>${'guia de escolha da cadeira '.repeat(40)}</p><a href="/products/a">Astra</a></main></body></html>`;
+  const cat = await run(catHtml, 'https://www.exemplo.com.br/collections/cadeiras', baseNet());
+  const cids = cat.res.__all.map((r) => r.id);
+  assert.equal(cat.ctx.pageType, 'category');
+  for (const id of ['E7', 'E9']) assert.ok(!cids.includes(id), id);
+  assert.equal(cat.res.C9.score >= 4, true, cat.res.C9.evidence);
+  assert.equal(cat.res.E2.score, 5, cat.res.E2.evidence);
+  assert.ok(!cids.some((i) => i.startsWith('PR') || i.startsWith('SV')));
+});
+
+test('e-commerce: home de loja não pede FAQ; home institucional ainda pede', async () => {
+  const shop = await run('<html lang="pt"><head><title>Loja de cadeiras ergonômicas e mesas | Exemplo</title><script src="https://cdn.shopify.com/s/x.js"></script></head><body><main><h1>Loja</h1></main></body></html>', 'https://loja.exemplo.com.br/', baseNet());
+  assert.ok(!shop.res.__all.some((r) => r.id === 'E7'));
+  const corp = await run('<html lang="pt"><head><title>Agência Exemplo | Marketing para empresas</title></head><body><main><h1>Agência</h1></main></body></html>', 'https://www.exemplo.com.br/', baseNet());
+  assert.ok(corp.res.__all.some((r) => r.id === 'E7'));
+});
+
+test('e-commerce: ?variant= não penaliza URL; terceiros e peso usam régua de loja; troca vale como termos', async () => {
+  const { page, DOMParser } = await collectFromHtml(GOOD_PRODUCT, 'https://www.exemplo.com.br/products/astra-pro?variant=123456');
+  page.perf.resources = { count: 120, bytes: 4.2 * 1048576, unknown: 0, byType: {}, hosts: Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`t${i}.terceiro${i}.com`, { count: 1, bytes: 1 }])) };
+  page.inst = { about: true, contact: true, privacy: true, terms: false, returns: true };
+  page.local.cnpj = true;
+  const ctx = buildContext(page, baseNet(), null, DOMParser);
+  const res = Object.fromEntries(finalize(runChecks(ctx)).map((r) => [r.id, r]));
+  assert.equal(res.C5.score, 5, res.C5.evidence);
+  assert.equal(res.P7.score, 3, res.P7.evidence);
+  assert.equal(res.P5.score, 3, res.P5.evidence);
+  assert.equal(res.E5.score, 5, res.E5.evidence);
+  const sem = buildContext(page, baseNet(), 'page', DOMParser);
+  sem.page = { ...page, platforms: [], conv: { ...page.conv, ctas: [] } };
+  const r2 = Object.fromEntries(finalize(runChecks(sem)).map((r) => [r.id, r]));
+  assert.equal(r2.P7.score, 2, 'fora de loja a régua continua rígida');
+});
