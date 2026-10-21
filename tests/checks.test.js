@@ -4,6 +4,9 @@ import { collectFromHtml } from './helpers.js';
 import { buildContext, runChecks, detectPageType, schemaPrices, schemaNodes, rawStats } from '../lib/checks.js';
 import { parseRobots } from '../lib/robots.js';
 import { finalize, summarize } from '../lib/scoring.js';
+import { INSIGHTS } from '../lib/insights.js';
+import { CHECKS } from '../lib/checks.js';
+import { toMarkdown, toCsv, headline } from '../lib/report.js';
 
 const BAD_PRODUCT = `<!doctype html><html><head>
 <title>Astra</title>
@@ -225,4 +228,26 @@ test('e-commerce: ?variant= não penaliza URL; terceiros e peso usam régua de l
   sem.page = { ...page, platforms: [], conv: { ...page.conv, ctas: [] } };
   const r2 = Object.fromEntries(finalize(runChecks(sem)).map((r) => [r.id, r]));
   assert.equal(r2.P7.score, 2, 'fora de loja a régua continua rígida');
+});
+
+test('todo item tem nome simples e "por que importa" em linguagem acessível', () => {
+  for (const c of CHECKS) assert.ok(INSIGHTS[c.id] && INSIGHTS[c.id][0] && INSIGHTS[c.id][1].length > 30, `${c.id} sem insight`);
+});
+
+test('resumo e exportações usam oportunidade de melhora e "onde focar primeiro"', async () => {
+  const { res, ctx } = await run(BAD_PRODUCT, 'https://www.exemplo.com.br/products/astra', baseNet());
+  const results = res.__all;
+  const summary = summarize(results);
+  assert.equal(summary.levels.page.opp, 'grande');
+  assert.match(headline('page', summary.levels.page), /Esta página tem grande oportunidade de melhora/);
+  const meta = { url: ctx.page.url, host: ctx.page.host, path: ctx.page.path, date: '2026-10-21', pageType: ctx.pageType, platforms: [] };
+  const md = toMarkdown({ meta, results, summary });
+  assert.match(md, /## Resumo/);
+  assert.match(md, /Onde focar primeiro/);
+  assert.match(md, /Grande oportunidade/);
+  assert.match(md, /Por que importa:/);
+  assert.doesNotMatch(md, /Sprint|prioridade \d/i);
+  const csv = toCsv({ meta, results });
+  assert.match(csv, /Oportunidade de melhora/);
+  assert.match(csv, /Grande oportunidade/);
 });

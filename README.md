@@ -13,12 +13,23 @@ Para atualizar: substitua os arquivos da pasta pela nova versão e clique em **r
 
 ## Como ler o resultado
 
-A análise sempre separa dois **níveis**:
+O resumo responde, em linguagem simples, **quanto ainda dá para melhorar**:
+
+| Oportunidade de melhora | O que significa | Nota do item |
+| --- | --- | --- |
+| **Grande** | Há falhas importantes: vale corrigir logo | 1–2 |
+| **Média** | O básico funciona, mas há ganho a buscar | 3 |
+| **Baixa** | Está bem; só ajustes finos | 4 |
+| **Sem oportunidade** | Tudo certo | 5 |
+
+A análise sempre separa dois **níveis**, cada um com a sua oportunidade geral, uma frase-resumo e a contagem de itens:
 
 - **Site** — vale para o domínio inteiro, seja qual for a página aberta: versões do domínio (http/https, www), robots.txt, sitemap, tratamento de 404 e acesso de rastreadores de IA.
 - **Página** — vale só para a URL aberta: indexabilidade, canonical, title, H1, links, imagens, schema, performance local e os itens específicos do tipo de página.
 
-Cada item tem **nota de 1 a 5** (1 Crítico · 2 Ruim · 3 Regular · 4 Bom · 5 Excelente), **o que encontramos** e **o que fazer**. A lista vem do pior para o melhor. Situação: nota 1–2 = com problema · 3 = atenção · 4–5 = ok. A nota de cada nível é a média simples dos itens avaliados (itens "não verificado" não entram).
+O resumo traz ainda **"Onde focar primeiro"** (os 5 itens com mais a ganhar, cada um com o *por que importa* em palavras simples) e a oportunidade da página **por tema**. Em **Achados**, cada item mostra o nome simples (com o nome técnico embaixo), *por que importa*, *o que encontramos* e *o que fazer*; dá para filtrar por nível e por oportunidade e ajustar a nota manualmente.
+
+**Como a oportunidade geral é definida:** pela média das notas dos itens, mas uma falha séria (nota 1–2) em item de peso alto, como página bloqueada para o Google, já coloca o nível em **grande**. "Sem oportunidade" só aparece quando todos os itens estão com nota 5.
 
 ### Tipos de página
 
@@ -39,7 +50,7 @@ A extensão detecta o tipo da página (por schema, URL e sinais da página) e mo
 
 ## Exportar
 
-Aba **Exportar**: copiar o resumo (Markdown), baixar `.md` ou `.csv` (uma linha por item, com nível, tema, nota, o que encontramos e o que fazer).
+Aba **Exportar**: copiar o resumo (Markdown), baixar `.md` ou `.csv` (uma linha por item, com nível, tema, oportunidade de melhora, nota, por que importa, o que encontramos e o que fazer).
 
 ## Limites conhecidos
 
@@ -60,6 +71,8 @@ npm test           # robots, notas, checagens com fixtures de produto e serviço
 npm run pack       # gera dist/scope-extension-vX.Y.Z.zip
 ```
 
-Estrutura: `lib/collector.js` (lê a página renderizada) · `lib/network.js` (robots, sitemap, variações, 404, links) · `lib/checks.js` (checagens, nível, tema e tipos de página) · `lib/scoring.js` (notas e médias) · `lib/report.js` (Markdown/CSV) · `sidepanel/` (interface).
+Os nomes simples e os textos de *por que importa* ficam em `lib/insights.js` (todo item novo precisa de uma entrada; o teste acusa se faltar).
+
+Estrutura: `lib/collector.js` (lê a página renderizada) · `lib/network.js` (robots, sitemap, variações, 404, links) · `lib/checks.js` (checagens, nível, tema e tipos de página) · `lib/scoring.js` (notas, oportunidade e médias) · `lib/report.js` (Markdown/CSV) · `sidepanel/` (interface).
 
 Para **adicionar uma checagem**, inclua um objeto no array do tema em `lib/checks.js` (`id`, `dim`, `name`, `impact` — só ordena empates —, `dependency`, `types` opcional para limitar a tipos de página, e `run(ctx)` devolvendo `ok(nota, evidência, recomendação)` ou `NA(motivo)`). Itens de nível site entram em `SITE_LEVEL`. Cubra com um teste em `tests/checks.test.js`.

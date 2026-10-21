@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { labelForAverage, finalize, summarize, statusOf, byWorst } from '../lib/scoring.js';
+import { labelForAverage, finalize, summarize, oppOf, byWorst } from '../lib/scoring.js';
 
 test('rótulos iguais aos relatórios', () => {
   assert.equal(labelForAverage(1.2), 'Crítico');
@@ -11,8 +11,8 @@ test('rótulos iguais aos relatórios', () => {
   assert.equal(labelForAverage(4.7), 'Excelente');
 });
 
-test('situação: 1–2 problema, 3 atenção, 4–5 ok', () => {
-  assert.deepEqual([1, 2, 3, 4, 5].map(statusOf), ['problem', 'problem', 'attention', 'ok', 'ok']);
+test('oportunidade: 1–2 grande, 3 média, 4 baixa, 5 nenhuma', () => {
+  assert.deepEqual([1, 2, 3, 4, 5].map(oppOf), ['grande', 'grande', 'media', 'baixa', 'nenhuma']);
 });
 
 test('nota manual recalcula; médias separadas por nível e tema; N/A fora da média', () => {
@@ -30,7 +30,7 @@ test('nota manual recalcula; médias separadas por nível e tema; N/A fora da m�
   assert.equal(sum.levels.site.avg, 4);
   assert.equal(sum.levels.page.avg, 4);
   assert.equal(sum.levels.page.naCount, 1);
-  assert.equal(sum.levels.site.attention, 1);
+  assert.equal(sum.levels.site.media, 1);
   assert.equal(sum.groups.produto.avg, 5);
   assert.equal(sum.groups.performance.avg, null);
 });
@@ -38,4 +38,16 @@ test('nota manual recalcula; médias separadas por nível e tema; N/A fora da m�
 test('ordenação do pior para o melhor, empate pelo impacto', () => {
   const list = [{ id: 'A', score: 3, impact: 2 }, { id: 'B', score: 1, impact: 1 }, { id: 'C', score: 3, impact: 5 }].sort(byWorst);
   assert.deepEqual(list.map((r) => r.id), ['B', 'C', 'A']);
+});
+
+test('oportunidade do nível: falha séria em item de peso alto sobe para grande, mesmo com média boa', () => {
+  const mk = (score, impact, id) => ({ id, level: 'page', group: 'tecnico', impact, score });
+  const bom = finalize([mk(5, 5, 'a'), mk(5, 4, 'b'), mk(5, 4, 'c'), mk(5, 3, 'd'), mk(1, 5, 'e')]);
+  assert.equal(summarize(bom).levels.page.opp, 'grande');
+  const leve = finalize([mk(5, 5, 'a'), mk(5, 4, 'b'), mk(5, 4, 'c'), mk(5, 3, 'd'), mk(2, 2, 'e')]);
+  assert.equal(summarize(leve).levels.page.opp, 'media', 'item ruim de peso baixo não passa de média');
+  const ok = finalize([mk(5, 5, 'a'), mk(5, 4, 'b'), mk(4, 2, 'c')]);
+  assert.equal(summarize(ok).levels.page.opp, 'baixa');
+  assert.equal(summarize(finalize([mk(5, 5, 'a'), mk(5, 4, 'b')])).levels.page.opp, 'nenhuma');
+  assert.equal(summarize(finalize([mk(2, 3, 'a'), mk(2, 3, 'b')])).levels.page.opp, 'grande');
 });

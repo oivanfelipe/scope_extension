@@ -1,8 +1,9 @@
 import { collectPage } from '../lib/collector.js';
 import { fetchPage, fetchVariants, fetchRobots, fetchSitemaps, fetchLlmsTxt, fetchSoft404, checkLinks } from '../lib/network.js';
 import { buildContext, runChecks, PAGE_TYPES } from '../lib/checks.js';
-import { GROUPS, LEVELS, SCORE_LABELS, STATUS, byWorst, finalize, summarize } from '../lib/scoring.js';
-import { toMarkdown, toCsv, fileStem } from '../lib/report.js';
+import { GROUPS, LEVELS, OPPS, SCORE_LABELS, byWorst, finalize, summarize } from '../lib/scoring.js';
+import { friendly, why } from '../lib/insights.js';
+import { toMarkdown, toCsv, fileStem, headline } from '../lib/report.js';
 
 const $ = (sel) => document.querySelector(sel);
 const view = $('#view');
@@ -12,7 +13,7 @@ const rerunBtn = $('#rerun');
 
 const state = {
   tab: null, page: null, net: null, pageTypeOverride: null, overrides: {},
-  results: [], summary: null, tabView: 'resumo', filter: { level: 'all', status: 'all' },
+  results: [], summary: null, tabView: 'resumo', filter: { level: 'all', opp: 'all' },
   running: false, analyzedUrl: null, toast: '',
 };
 
@@ -147,71 +148,76 @@ function renderTarget() {
     </div>`;
 }
 
-const scoreClass = (n) => `s${n}`;
+const oppClass = (o) => `o-${o || 'nenhuma'}`;
 const levelTag = (lvl) => `<span class="lvl lvl-${lvl}">${LEVELS[lvl].label}</span>`;
+const oppPill = (o) => `<span class="pill ${oppClass(o)}">${esc(OPPS[o].label)}</span>`;
+const itemTitle = (r) => friendly(r.id, r.name);
 
-function scoreCard(lvl, title, sub) {
+function oppCard(lvl, title) {
   const s = state.summary.levels[lvl];
-  return `<div class="card overall ${scoreClass(s.level)}">
-    <div class="num">${fmt(s.avg)}<small> /5</small></div>
-    <div>
-      <div class="scope-title">${levelTag(lvl)} ${esc(title)}</div>
-      <div class="lbl">${esc(s.label)}</div>
-      <p>${esc(sub)}</p>
-      <p class="counts"><b class="c-problem">${s.problem}</b> com problema · <b class="c-attention">${s.attention}</b> atenção · <b class="c-ok">${s.ok}</b> ok${s.naCount ? ` · ${s.naCount} não verificados` : ''}</p>
-    </div></div>`;
+  const chips = [['grande', s.grande], ['media', s.media], ['baixa', s.baixa], ['nenhuma', s.nenhuma]]
+    .map(([o, n]) => `<span class="mini ${oppClass(o)}"><b>${n}</b> ${esc(OPPS[o].short)}</span>`).join('');
+  return `<div class="card opp ${oppClass(s.opp)}">
+    <div class="scope-title">${levelTag(lvl)} ${esc(title)}</div>
+    <div class="opp-label">${esc(OPPS[s.opp]?.label || '—')}</div>
+    <p class="opp-text">${esc(headline(lvl, s))}</p>
+    <div class="minis" aria-label="Itens por oportunidade">${chips}</div>
+    <p class="nota">Nota geral ${fmt(s.avg)} de 5${s.naCount ? ` · ${s.naCount} não verificados` : ''}</p>
+  </div>`;
 }
 
 function renderResumo() {
   const { summary, results, page, ctx } = state;
-  const top = results.filter((r) => !r.na && r.score <= 3).sort(byWorst).slice(0, 8);
+  const focus = results.filter((r) => !r.na && r.score <= 3).sort(byWorst).slice(0, 5);
   return `
-    ${scoreCard('site', page.host, 'Vale para o domínio inteiro: rastreamento, versões do domínio, sitemap, 404 e acesso de IA.')}
-    ${scoreCard('page', `${new URL(page.url).pathname}`, `Só esta URL · tipo: ${PAGE_TYPES[ctx.pageType]}.`)}
+    ${oppCard('page', new URL(page.url).pathname + ` · ${PAGE_TYPES[ctx.pageType]}`)}
+    ${oppCard('site', page.host)}
 
-    <div class="card"><h3>Nível página por tema</h3><div class="dims">
-      ${Object.entries(summary.groups).map(([g, s]) => `<div class="dim ${scoreClass(s.level)}">
-        <span class="nm">${esc(s.name)}<small>${s.count} itens${s.problem ? ` · ${s.problem} com problema` : ''}</small></span>
-        <span class="val">${fmt(s.avg)}</span>
+    <div class="card"><h3>Onde focar primeiro</h3>
+      ${focus.length ? `<ol class="focus">${focus.map((r) => `<li class="${oppClass(r.opp)}"><button type="button" data-open="${r.id}">
+        <span class="f-top">${levelTag(r.level)} ${oppPill(r.opp)}</span>
+        <span class="f-name">${esc(itemTitle(r))}</span>
+        <span class="f-why">${esc(why(r.id))}</span>
+        <span class="f-go">Ver o que fazer →</span></button></li>`).join('')}</ol>`
+      : '<p style="margin:0;color:var(--muted)">Nenhum ponto com oportunidade média ou grande. Só restam ajustes finos.</p>'}
+    </div>
+
+    <div class="card"><h3>Página por tema</h3><div class="dims">
+      ${Object.entries(summary.groups).map(([g, s]) => `<div class="dim ${oppClass(s.opp)}">
+        <span class="nm">${esc(s.name)}<small>${s.grande} grande · ${s.media} média · ${s.baixa} baixa · ${s.nenhuma} ok</small></span>
+        <span class="val">${esc(OPPS[s.opp]?.short || '—')}</span>
         <span class="bar"><i style="width:${s.avg ? (s.avg / 5) * 100 : 0}%"></i></span></div>`).join('')}
     </div></div>
 
-    <div class="card"><h3>Pontos de ação (nota 1 a 3)</h3>
-      ${top.length ? `<ul class="prio">${top.map((r) => `<li><button type="button" data-open="${r.id}">
-        ${levelTag(r.level)}
-        <span class="t">${esc(r.name)}</span>
-        <span class="pill ${scoreClass(r.score)}">${r.score}</span></button></li>`).join('')}</ul>`
-      : '<p style="margin:0;color:var(--muted)">Nenhum ponto de ação: tudo com nota 4 ou 5.</p>'}
-    </div>
-
-    <div class="notice"><b>O que é cada nível.</b> <b>Site</b> = o que vale para o domínio todo (aparece igual em qualquer página dele). <b>Página</b> = só esta URL; os itens de <b>produto</b> ou <b>serviço</b> aparecem conforme o tipo da página. Não usa Search Console, Semrush nem PageSpeed; performance é medição local, indicativa.</div>`;
+    <div class="notice"><b>Como ler.</b> <b>Oportunidade de melhora</b> mostra o quanto ainda dá para ganhar: <b>grande</b> (corrigir logo), <b>média</b>, <b>baixa</b> (ajuste fino) ou <b>sem oportunidade</b> (ok). <b>Site</b> vale para o domínio inteiro; <b>Página</b> vale só para esta URL; itens de produto ou serviço aparecem conforme o tipo da página. Não usa Search Console, Semrush nem PageSpeed; performance é medição local, indicativa.</div>`;
 }
 
 function findingHtml(r, open = false) {
   if (r.na) {
-    return `<details class="finding na" id="f-${r.id}"><summary><span class="nm">${esc(r.name)}</span><span class="meta">${levelTag(r.level)}<span class="badge st-na">Não verificado</span></span></summary>
+    return `<details class="finding na" id="f-${r.id}"><summary><span class="nm">${esc(itemTitle(r))}<small>${esc(r.name)}</small></span><span class="meta">${levelTag(r.level)}<span class="pill o-na">Não verificado</span></span></summary>
       <div class="body"><div class="txt">${esc(r.reason)}</div></div></details>`;
   }
-  return `<details class="finding ${scoreClass(r.score)}" id="f-${r.id}" ${open ? 'open' : ''}>
-    <summary><span class="nm">${esc(r.name)}</span>
-      <span class="meta">${levelTag(r.level)}<span class="pill ${scoreClass(r.score)}">${r.score} · ${SCORE_LABELS[r.score]}</span></span></summary>
+  return `<details class="finding ${oppClass(r.opp)}" id="f-${r.id}" ${open ? 'open' : ''}>
+    <summary><span class="nm">${esc(itemTitle(r))}<small>${esc(r.name)}</small></span>
+      <span class="meta">${levelTag(r.level)}${oppPill(r.opp)}</span></summary>
     <div class="body">
+      ${why(r.id) ? `<div><span class="lab">Por que importa</span><div class="txt">${esc(why(r.id))}</div></div>` : ''}
       <div><span class="lab">O que encontramos</span><div class="txt">${esc(r.evidence)}</div></div>
       ${r.score < 5 && r.recommendation ? `<div><span class="lab">O que fazer</span><div class="txt">${esc(r.recommendation)}</div></div>` : '<div class="txt" style="color:var(--s5);font-weight:600">Sem ação necessária.</div>'}
-      <div class="calc">
-        <label>Nota manual: <select data-override="${r.id}" aria-label="Nota manual de ${esc(r.name)}">
-          <option value="">auto (${r.autoScore})</option>${[1, 2, 3, 4, 5].map((n) => `<option value="${n}" ${r.overridden && r.score === n ? 'selected' : ''}>${n} · ${SCORE_LABELS[n]}</option>`).join('')}
+      <div class="calc"><span>Nota ${r.score} de 5 (${SCORE_LABELS[r.score]})</span>
+        <label>Ajustar nota: <select data-override="${r.id}" aria-label="Ajustar nota de ${esc(itemTitle(r))}">
+          <option value="">automática (${r.autoScore})</option>${[1, 2, 3, 4, 5].map((n) => `<option value="${n}" ${r.overridden && r.score === n ? 'selected' : ''}>${n} · ${SCORE_LABELS[n]}</option>`).join('')}
         </select></label></div>
     </div></details>`;
 }
 
 function renderAchados(openId) {
   const { results, page, ctx } = state;
-  const { level, status } = state.filter;
-  const match = (r) => (level === 'all' || r.level === level) && (status === 'all' || r.na === undefined && r.status === status);
+  const { level, opp } = state.filter;
+  const match = (r) => (level === 'all' || r.level === level) && (opp === 'all' || r.opp === opp);
   const chip = (group, value, label) => `<button type="button" class="chip" data-filter="${group}" data-value="${value}" aria-pressed="${state.filter[group] === value}">${label}</button>`;
   const sections = [];
-  for (const lvl of ['site', 'page']) {
+  for (const lvl of ['page', 'site']) {
     if (level !== 'all' && level !== lvl) continue;
     const items = results.filter((r) => r.level === lvl);
     const heading = lvl === 'site'
@@ -223,14 +229,14 @@ function renderAchados(openId) {
       if (!gi.length) continue;
       body += `<h4 class="grp">${esc(GROUPS[g])}</h4><div class="list">${gi.map((r) => findingHtml(r, r.id === openId)).join('')}</div>`;
     }
-    const na = status === 'all' ? items.filter((r) => r.na) : [];
+    const na = opp === 'all' ? items.filter((r) => r.na) : [];
     if (na.length) body += `<details class="na-group"><summary>Não verificado (${na.length})</summary><div class="list" style="margin-top:6px">${na.map((r) => findingHtml(r)).join('')}</div></details>`;
     sections.push(`<section class="lvl-sec"><h3 class="lvl-head">${heading}</h3>${body || '<div class="state"><p style="margin:0">Nenhum item neste filtro.</p></div>'}</section>`);
   }
   return `
     <div class="filters">
-      <div class="chips" role="group" aria-label="Filtrar por nível">${chip('level', 'all', 'Site e página')}${chip('level', 'site', 'Só site')}${chip('level', 'page', 'Só página')}</div>
-      <div class="chips" role="group" aria-label="Filtrar por situação">${chip('status', 'all', 'Todas as notas')}${chip('status', 'problem', 'Com problema (1–2)')}${chip('status', 'attention', 'Atenção (3)')}${chip('status', 'ok', 'OK (4–5)')}</div>
+      <div class="chips" role="group" aria-label="Filtrar por nível">${chip('level', 'all', 'Página e site')}${chip('level', 'page', 'Só página')}${chip('level', 'site', 'Só site')}</div>
+      <div class="chips" role="group" aria-label="Filtrar por oportunidade">${chip('opp', 'all', 'Todas')}${chip('opp', 'grande', 'Grande')}${chip('opp', 'media', 'Média')}${chip('opp', 'baixa', 'Baixa')}${chip('opp', 'nenhuma', 'Sem oportunidade')}</div>
     </div>
     ${sections.join('')}`;
 }
@@ -265,7 +271,7 @@ view.addEventListener('click', async (e) => {
   const t = e.target.closest('[data-tab],[data-open],[data-filter],[data-export]');
   if (!t) return;
   if (t.dataset.tab) { state.tabView = t.dataset.tab; render(); }
-  else if (t.dataset.open) { state.filter = { level: 'all', status: 'all' }; state.tabView = 'achados'; render(t.dataset.open); document.getElementById('f-' + t.dataset.open)?.setAttribute('open', ''); }
+  else if (t.dataset.open) { state.filter = { level: 'all', opp: 'all' }; state.tabView = 'achados'; render(t.dataset.open); document.getElementById('f-' + t.dataset.open)?.setAttribute('open', ''); }
   else if (t.dataset.filter) { state.filter[t.dataset.filter] = t.dataset.value; render(); }
   else if (t.dataset.export) await doExport(t.dataset.export);
 });
