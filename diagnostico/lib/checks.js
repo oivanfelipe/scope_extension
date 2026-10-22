@@ -40,7 +40,9 @@ export const CHECKS = [
   // ---------------------------------------------------------------- Velocidade
   {
     id: 'V1', group: 'velocidade', name: 'O site aparece rápido',
-    why: 'Quanto mais demora, mais visitantes desistem antes de ver a sua oferta.',
+    weight: 10, problem: "O site demora para abrir",
+    cost: "Quanto mais demora, mais visitantes desistem antes de ver a sua oferta, inclusive os que chegaram por anúncio pago: você paga pelo clique e perde a pessoa.",
+    fix: "Otimizar imagens, reduzir scripts e melhorar a hospedagem até o conteúdo principal aparecer em até 2,5 segundos.",
     run: (d) => {
       const ms = mainSpeedMs(d);
       if (ms == null) return na('Não foi possível medir o tempo de carregamento.');
@@ -50,7 +52,9 @@ export const CHECKS = [
   },
   {
     id: 'V2', group: 'velocidade', name: 'O servidor responde rápido',
-    why: 'Um servidor lento atrasa tudo o que vem depois, em todas as páginas.',
+    weight: 6, problem: "O servidor demora para responder",
+    cost: "Tudo o que vem depois também atrasa, em todas as páginas do site.",
+    fix: "Revisar a hospedagem e ativar cache; em geral, um servidor melhor ou uma camada de cache resolvem.",
     run: (d) => {
       const ms = d.speed.ttfbMs;
       if (ms == null) return na('Não foi possível medir o tempo de resposta do servidor.');
@@ -60,7 +64,9 @@ export const CHECKS = [
   },
   {
     id: 'V3', group: 'velocidade', name: 'A página é leve',
-    why: 'Páginas com centenas de arquivos pesam no celular e em conexões mais lentas.',
+    weight: 5, problem: "A página está pesada",
+    cost: "No celular e em conexões mais lentas, a página pesa e demora ainda mais para abrir.",
+    fix: "Reduzir imagens, scripts e plugins que não são usados.",
     run: (d) => {
       const n = d.speed.requests;
       const t = `A página carrega ${n} arquivos (o ideal é até 80).`;
@@ -71,12 +77,16 @@ export const CHECKS = [
   // ---------------------------------------------------------------- Estrutura
   {
     id: 'E1', group: 'estrutura', name: 'O site é seguro (cadeado)',
-    why: 'Sem o cadeado, o navegador avisa que o site não é seguro e o Google rebaixa a página.',
+    weight: 8, problem: "O site não é seguro (sem cadeado)",
+    cost: "O navegador avisa que o site não é seguro e o Google rebaixa a página; muita gente abandona ao ver o aviso.",
+    fix: "Instalar um certificado HTTPS e redirecionar todo o tráfego para ele.",
     run: (d) => (d.structure.https ? ok('O endereço usa HTTPS.') : bad('O endereço abre sem HTTPS (sem cadeado).')),
   },
   {
     id: 'E2', group: 'estrutura', name: 'Tem título para o Google',
-    why: 'O título é a primeira linha que aparece na busca. Sem um bom título, menos gente clica.',
+    weight: 6, problem: "Título da página ausente ou fora do tamanho ideal",
+    cost: "O título é a primeira linha que aparece na busca do Google; um título ruim reduz os cliques no seu resultado.",
+    fix: "Escrever um título de 15 a 65 caracteres com o serviço e a cidade ou o diferencial.",
     run: (d) => {
       const len = d.structure.title.trim().length;
       if (!len) return bad('A página não tem título.');
@@ -86,7 +96,9 @@ export const CHECKS = [
   },
   {
     id: 'E3', group: 'estrutura', name: 'Tem descrição para o Google',
-    why: 'A descrição é o texto que aparece abaixo do título na busca e convence a pessoa a clicar.',
+    weight: 4, problem: "Sem descrição para o Google",
+    cost: "O texto abaixo do título na busca fica aleatório e menos gente clica no seu resultado.",
+    fix: "Escrever uma descrição de 50 a 170 caracteres que convença a clicar.",
     run: (d) => {
       const len = d.structure.description.trim().length;
       if (!len) return bad('A página não tem descrição.');
@@ -96,7 +108,9 @@ export const CHECKS = [
   },
   {
     id: 'E4', group: 'estrutura', name: 'Tem um título principal claro (H1)',
-    why: 'O título principal diz ao Google e ao visitante do que a página trata.',
+    weight: 5, problem: "Título principal (H1) ausente ou repetido",
+    cost: "O título principal diz ao Google e ao visitante do que a página trata; sem ele, a página perde clareza e posição.",
+    fix: "Deixar um único título principal, com a palavra que o cliente busca.",
     run: (d) => {
       const n = d.structure.h1Count;
       if (n === 0) return bad('A página não tem título principal (H1).');
@@ -106,7 +120,9 @@ export const CHECKS = [
   },
   {
     id: 'E5', group: 'estrutura', name: 'As imagens têm descrição',
-    why: 'Sem descrição nas imagens, o Google não entende as fotos e perde-se acessibilidade.',
+    weight: 3, problem: "Imagens sem descrição",
+    cost: "O Google não entende as fotos, e quem usa leitor de tela fica sem informação.",
+    fix: "Descrever cada imagem relevante em uma frase curta.",
     run: (d) => {
       const { imgTotal: t, imgWithAlt: a } = d.structure;
       if (!t) return na('A página não tem imagens para avaliar.');
@@ -116,12 +132,16 @@ export const CHECKS = [
   },
   {
     id: 'E6', group: 'estrutura', name: 'Funciona bem no celular',
-    why: 'A maior parte das visitas vem do celular. Sem adaptação, o site fica ilegível.',
+    weight: 8, problem: "O site não está adaptado ao celular",
+    cost: "A maior parte das visitas vem do celular; sem adaptação o site fica ilegível e o visitante sai.",
+    fix: "Configurar o site para telas pequenas (design responsivo).",
     run: (d) => (d.structure.viewport ? ok('A página se adapta à tela do celular.') : bad('A página não está configurada para telas de celular.')),
   },
   {
     id: 'E7', group: 'estrutura', name: 'O Google pode encontrar o site',
-    why: 'Se o site está bloqueado para o Google, ele simplesmente não aparece nas buscas.',
+    weight: 10, problem: "O Google está impedido de encontrar o site",
+    cost: "Se o site está bloqueado, ele não aparece nas buscas: é como ter a loja aberta com a porta trancada.",
+    fix: "Remover o bloqueio (noindex ou robots.txt) o quanto antes.",
     run: (d, net) => {
       if (d.structure.noindex) return bad('A página pede ao Google para não aparecer na busca (noindex).');
       if (net?.robots?.blocksAll) return bad('O arquivo robots.txt bloqueia o Google em todo o site.');
@@ -131,7 +151,9 @@ export const CHECKS = [
   },
   {
     id: 'E8', group: 'estrutura', name: 'Tem mapa do site (sitemap)',
-    why: 'O mapa do site mostra ao Google todas as páginas, e elas são encontradas mais rápido.',
+    weight: 4, problem: "Sem mapa do site (sitemap)",
+    cost: "Sem o mapa, o Google demora mais para descobrir páginas novas e pode deixar páginas importantes de fora.",
+    fix: "Publicar o sitemap.xml e enviá-lo ao Google Search Console.",
     run: (d, net) => {
       const s = net?.sitemap?.status;
       if (s === 'found') return ok('O mapa do site está publicado.');
@@ -141,14 +163,18 @@ export const CHECKS = [
   },
   {
     id: 'E9', group: 'estrutura', name: 'Tem dados estruturados (schema)',
-    why: 'Dados estruturados permitem estrelas, preços e endereço direto no resultado do Google.',
+    weight: 3, problem: "Sem dados estruturados (schema)",
+    cost: "Sem eles, o seu resultado no Google não mostra estrelas, preço ou endereço, e chama menos atenção que o do concorrente.",
+    fix: "Adicionar o schema da empresa, dos serviços e das avaliações.",
     run: (d) => (d.structure.schemaCount > 0 ? ok(`${d.structure.schemaCount} bloco(s) de dados estruturados.`) : bad('Não encontramos dados estruturados na página.')),
   },
 
   // ---------------------------------------------------------------- Rastreamento
   {
     id: 'R1', group: 'rastreamento', name: 'Google Analytics instalado',
-    why: 'Sem ele, você não sabe quantas pessoas visitam o site nem de onde elas vêm.',
+    weight: 8, problem: "Google Analytics não instalado",
+    cost: "Sem ele, você não sabe quantas pessoas visitam o site, de onde vêm nem o que fazem. Decide no escuro e perde dados todos os dias.",
+    fix: "Instalar o Google Analytics 4 pelo Gerenciador de Tags e marcar os contatos como conversões.",
     run: (d) => {
       const t = d.tracking;
       if (t.ga4Ids.length) return ok(`Google Analytics 4 encontrado (${trackingFound(t.ga4Ids)}).`);
@@ -159,17 +185,23 @@ export const CHECKS = [
   },
   {
     id: 'R2', group: 'rastreamento', name: 'Gerenciador de Tags (GTM) instalado',
-    why: 'É ele que permite instalar e ajustar o rastreamento sem mexer no código do site.',
+    weight: 5, problem: "Gerenciador de Tags (GTM) não instalado",
+    cost: "Cada ferramenta de rastreamento depende de programador, o que atrasa e encarece qualquer ajuste.",
+    fix: "Instalar o GTM uma vez; depois as tags são ajustadas sem mexer no código.",
     run: (d) => (d.tracking.gtmIds.length ? ok(`GTM encontrado (${trackingFound(d.tracking.gtmIds)}).`) : bad('Não encontramos o Google Tag Manager.')),
   },
   {
     id: 'R3', group: 'rastreamento', name: 'Pixel do Meta (Facebook e Instagram)',
-    why: 'Sem o Pixel, os anúncios no Facebook e Instagram não otimizam nem reaproveitam visitantes.',
+    weight: 7, problem: "Pixel do Meta não instalado",
+    cost: "Os anúncios do Facebook e Instagram não aprendem quem compra e não reaproveitam quem visitou o site. Tende a sair mais caro cada contato.",
+    fix: "Instalar o Pixel pelo Gerenciador de Tags e configurar os eventos de contato.",
     run: (d) => (d.tracking.metaPixel ? ok('Pixel do Meta encontrado.') : bad('Não encontramos o Pixel do Meta.')),
   },
   {
     id: 'R4', group: 'rastreamento', name: 'Tag do Google Ads instalada',
-    why: 'Sem ela, o Google Ads não sabe quais cliques viraram clientes e não faz remarketing.',
+    weight: 7, problem: "Tag do Google Ads não instalada",
+    cost: "O Google não sabe quais cliques viraram clientes, então não otimiza a verba, e você não consegue anunciar para quem já visitou o site.",
+    fix: "Criar a conversão no Google Ads e instalar a tag pelo Gerenciador de Tags.",
     run: (d) => {
       const t = d.tracking;
       if (t.adsIds.length || t.adsRequest) return ok(`Tag do Google Ads encontrada${t.adsIds.length ? ` (${trackingFound(t.adsIds)})` : ''}.`);
@@ -181,27 +213,37 @@ export const CHECKS = [
   // ---------------------------------------------------------------- Conversão
   {
     id: 'C1', group: 'conversao', name: 'Tem botão de ação na primeira tela',
-    why: 'Quem chega e não vê o que fazer vai embora. O botão precisa estar visível sem rolar.',
+    weight: 9, problem: "Sem botão de ação na primeira tela",
+    cost: "Quem chega não sabe qual é o próximo passo e vai embora sem pedir orçamento ou agendar.",
+    fix: "Colocar um botão claro (por exemplo, \"Agendar avaliação\") logo no topo da página.",
     run: (d) => (d.conversion.ctaAboveFold ? ok(`Botão encontrado: "${d.conversion.ctaAboveFold}".`) : bad('Não encontramos um botão de ação visível na primeira tela.')),
   },
   {
     id: 'C2', group: 'conversao', name: 'Tem WhatsApp',
-    why: 'O WhatsApp é o canal que o cliente brasileiro mais usa para tirar dúvida e fechar.',
+    weight: 7, problem: "Sem WhatsApp",
+    cost: "O WhatsApp é o canal que o cliente brasileiro mais usa para tirar dúvida e fechar; sem ele, parte dos contatos se perde.",
+    fix: "Colocar um botão de WhatsApp fixo, com mensagem inicial pronta.",
     run: (d) => (d.conversion.whatsapp ? ok('Há link ou botão de WhatsApp.') : bad('Não encontramos WhatsApp na página.')),
   },
   {
     id: 'C3', group: 'conversao', name: 'Tem formulário de contato',
-    why: 'O formulário captura quem não quer ligar nem chamar no WhatsApp.',
+    weight: 6, problem: "Sem formulário de contato",
+    cost: "Quem não quer ligar nem chamar no WhatsApp não tem como deixar o contato, e a oportunidade se perde.",
+    fix: "Criar um formulário curto (nome, telefone e e-mail) e ligá-lo ao atendimento.",
     run: (d) => (d.conversion.forms > 0 ? ok(`${d.conversion.forms} formulário(s) na página.`) : bad('Não encontramos formulário de contato na página.')),
   },
   {
     id: 'C4', group: 'conversao', name: 'Tem telefone para clicar',
-    why: 'No celular, o telefone precisa ligar com um toque. Senão a pessoa desiste de copiar o número.',
+    weight: 4, problem: "Telefone não clicável",
+    cost: "No celular, a pessoa precisa copiar o número, e parte desiste nesse ponto.",
+    fix: "Transformar o telefone em link de chamada.",
     run: (d) => (d.conversion.phone ? ok('Há telefone clicável.') : bad('Não encontramos telefone clicável.')),
   },
   {
     id: 'C5', group: 'conversao', name: 'Mostra provas de outros clientes',
-    why: 'Depoimentos, avaliações e cases dão confiança a quem ainda não conhece a empresa.',
+    weight: 5, problem: "Sem provas de outros clientes",
+    cost: "Quem ainda não conhece a empresa precisa de segurança; sem depoimentos, avaliações ou cases, a decisão demora ou vai para o concorrente.",
+    fix: "Incluir depoimentos reais, avaliações do Google e casos de clientes.",
     run: (d) => (d.conversion.socialProof ? ok('Encontramos depoimentos, avaliações ou cases.') : bad('Não identificamos depoimentos, avaliações ou cases na página.')),
   },
 ];
@@ -210,7 +252,7 @@ export function runChecks(data, net = {}) {
   return CHECKS.map((c) => {
     let res;
     try { res = c.run(data, net); } catch (e) { res = na(`Erro na verificação: ${e.message}`); }
-    return { id: c.id, group: c.group, name: c.name, why: c.why, ...res };
+    return { id: c.id, group: c.group, name: c.name, problem: c.problem, cost: c.cost, fix: c.fix, weight: c.weight, ...res };
   });
 }
 
@@ -238,4 +280,10 @@ export function summarize(results, groups = GROUPS, headlineFn = siteHeadline) {
   overall.fix = overall.bad + overall.warn;
   overall.headline = overall.total ? headlineFn(overall) : 'Não foi possível verificar nenhum item.';
   return { groups: byGroup, overall };
+}
+
+/** Os pontos que mais custam clientes: ruins antes dos de atenção e, em cada faixa, os de maior peso. */
+export function topLosses(results, n = 3) {
+  const rank = { bad: 0, warn: 1 };
+  return results.filter((r) => r.status in rank).sort((a, b) => rank[a.status] - rank[b.status] || (b.weight ?? 0) - (a.weight ?? 0)).slice(0, n);
 }

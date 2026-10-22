@@ -16,7 +16,14 @@ Extensão interna para **reunião de venda**. Com um clique mostra, em linguagem
 4. **Baixar .md** ou **Copiar resumo** para a proposta ou para o WhatsApp.
 5. O resultado de cada análise fica salvo por site, só neste navegador (`chrome.storage.local`), com a comparação com a análise anterior.
 
-## O que é verificado (21 itens, 4 áreas)
+## Como cada resultado é apresentado
+
+- **Número em destaque** (velocidade, engajamento ou anúncios ativos) com um parágrafo **"Na prática"** que explica a consequência em palavras simples.
+- **Onde está perdendo clientes:** os 3 pontos de maior impacto, ruins antes dos de atenção e, em cada faixa, por peso.
+- **Cada item ruim ou em atenção** mostra três linhas: **o que encontramos**, **o que isso causa** e **como resolver**. Os itens bons ficam recolhidos em "Ver o que está bom"; os que não puderam ser verificados ficam em "Não verificado".
+- Os textos de "o que isso causa" e "como resolver" são fixos por item (`lib/checks.js`, `lib/instagram.js`, `lib/adlibrary.js`), em linguagem condicional ("tende a", "pode"), porque a extensão enxerga a página, não o faturamento do cliente. O `.md` traz as mesmas três linhas.
+
+## O que é verificado no site (21 itens, 4 áreas)
 
 | Área | Itens |
 | --- | --- |
@@ -62,6 +69,6 @@ npm test        # checagens, limites de velocidade, robots.txt e relatório
 npm run pack
 ```
 
-Para **adicionar um item**, inclua um objeto em `CHECKS` (`lib/checks.js`) com `id`, `group`, `name`, `why` e `run(dados, rede)` devolvendo `ok/warn/bad/na`. A coleta na página fica em `lib/collector.js` (função autocontida, roda na aba).
+Para **adicionar um item**, inclua um objeto em `CHECKS` (`lib/checks.js`) com `id`, `group`, `name` (texto quando está bom), `weight` (1 a 10, usado na ordem de "onde está perdendo clientes"), `problem` (título quando está ruim), `cost` (o que isso causa), `fix` (como resolver) e `run(dados, rede)` devolvendo `ok/warn/bad/na`. O teste acusa se faltar algum campo. A coleta na página fica em `lib/collector.js` (função autocontida, roda na aba).
 
 Próximas etapas previstas: Google Ads Transparency e LinkedIn Ad Library.

@@ -1,4 +1,4 @@
-import { GROUPS, LEVEL_LABEL, fmtSeconds, mainSpeedMs, speedLevel } from './checks.js';
+import { GROUPS, LEVEL_LABEL, fmtSeconds, mainSpeedMs, speedLevel, topLosses } from './checks.js';
 
 const ICON = { ok: '✅', warn: '⚠️', bad: '❌', na: '➖' };
 
@@ -14,19 +14,27 @@ export function speedSentence(ms) {
 const SITE_CTX = { title: 'Diagnóstico rápido do site', groups: GROUPS };
 
 /** Relatório em Markdown: o mesmo checklist da tela, para anexar à proposta. */
-export function toMarkdown({ client, data, results, summary, date, ctx = SITE_CTX, bigSentence, ai }) {
+export function toMarkdown({ client, data, results, summary, date, ctx = SITE_CTX, bigSentence, bigContext, ai }) {
   const o = summary.overall;
   const sentence = bigSentence ?? speedSentence(mainSpeedMs(data));
   const L = [];
   L.push(`# ${ctx.title}${client ? ` — ${client}` : ''}`, '');
   L.push(`- **Endereço:** ${data.url}`, `- **Data:** ${date}`, '');
   L.push(`## Resultado: ${o.ok} de ${o.total} itens estão bons`, '', o.headline, '');
-  if (sentence) L.push(`> ${sentence}`, '');
+  if (sentence) L.push(`> ${sentence}${bigContext ? ` ${bigContext}` : ''}`, '');
+  const losses = topLosses(results);
+  if (losses.length) {
+    L.push('## Onde está perdendo clientes', '');
+    losses.forEach((r, i) => L.push(`${i + 1}. **${r.problem}.** ${r.cost}`));
+    L.push('');
+  }
   for (const g of ctx.groups) {
     const gs = summary.groups[g.id];
     L.push(`## ${g.name} — ${LEVEL_LABEL[gs.level] || 'Sem dados'}`, `_${g.sub}_`, '');
     for (const r of results.filter((x) => x.group === g.id)) {
-      L.push(`- ${ICON[r.status]} **${r.name}.** ${r.found}${r.status === 'bad' || r.status === 'warn' ? ` _Por que importa: ${r.why}_` : ''}`);
+      if (r.status === 'bad' || r.status === 'warn') {
+        L.push(`- ${ICON[r.status]} **${r.problem}.** ${r.found}`, `  - O que isso causa: ${r.cost}`, `  - Como resolver: ${r.fix}`);
+      } else L.push(`- ${ICON[r.status]} **${r.name}.** ${r.found}`);
     }
     L.push('');
   }
@@ -39,7 +47,7 @@ export function toMarkdown({ client, data, results, summary, date, ctx = SITE_CT
 /** Resumo curto para colar em conversa (WhatsApp, e-mail). */
 export function toShortText({ client, data, results, summary, ctx = SITE_CTX, bigSentence }) {
   const o = summary.overall;
-  const bads = results.filter((r) => r.status === 'bad').map((r) => `• ${r.name}`);
+  const bads = results.filter((r) => r.status === 'bad').map((r) => `• ${r.problem}`);
   return [
     `${ctx.title}${client ? ` — ${client}` : ''} (${data.host})`,
     `${o.ok} de ${o.total} itens estão bons.`,

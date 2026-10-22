@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runChecks, summarize, speedLevel, mainSpeedMs, fmtSeconds, CHECKS, GROUPS } from '../lib/checks.js';
+import { runChecks, summarize, speedLevel, mainSpeedMs, fmtSeconds, topLosses, CHECKS, GROUPS } from '../lib/checks.js';
 import { parseRobots } from '../lib/network.js';
 import { toMarkdown, toShortText, speedSentence } from '../lib/report.js';
 
@@ -22,13 +22,27 @@ const bad = () => ({
 const badNet = { robots: { status: 'missing', blocksAll: false, sitemaps: [] }, sitemap: { status: 'missing' } };
 const by = (results, id) => results.find((r) => r.id === id);
 
-test('todo item tem id único, área válida e texto "por que importa"', () => {
+test('todo item tem id único, área válida e contexto (problema, o que causa, como resolver, peso)', () => {
   const ids = CHECKS.map((c) => c.id);
   assert.equal(new Set(ids).size, ids.length);
   for (const c of CHECKS) {
     assert.ok(GROUPS.some((g) => g.id === c.group), c.id);
-    assert.ok(c.name && c.why, c.id);
+    assert.ok(c.name && c.problem && c.cost && c.fix, c.id);
+    assert.ok(c.weight >= 1 && c.weight <= 10, c.id);
   }
+});
+
+test('onde está perdendo clientes: ruins antes de atenção, por peso, no máximo 3', () => {
+  const r = runChecks(bad(), badNet);
+  const top = topLosses(r);
+  assert.equal(top.length, 3);
+  assert.ok(top.every((x) => x.status === 'bad'));
+  assert.ok(top[0].weight >= top[1].weight && top[1].weight >= top[2].weight);
+  assert.equal(top[0].weight, 10);
+  const d = good(); d.speed.lcpMs = 3000; d.structure.imgWithAlt = 5;
+  const mixed = topLosses(runChecks(d, goodNet));
+  assert.deepEqual(mixed.map((x) => x.id), ['V1', 'E5']);
+  assert.deepEqual(topLosses(runChecks(good(), goodNet)), []);
 });
 
 test('site bom: todos os itens ok e veredito positivo', () => {
@@ -112,7 +126,9 @@ test('relatório .md traz placar, velocidade e os itens com ícone', () => {
   assert.match(md, /# Diagnóstico rápido do site — Cliente X/);
   assert.match(md, /0 de 21 itens estão bons/);
   assert.match(md, /5,2 segundos/);
-  assert.match(md, /❌ \*\*O site aparece rápido\./);
-  assert.match(md, /Por que importa:/);
+  assert.match(md, /❌ \*\*O site demora para abrir\.\*\*/);
+  assert.match(md, /O que isso causa: Quanto mais demora/);
+  assert.match(md, /Como resolver: Otimizar imagens/);
+  assert.match(md, /## Onde está perdendo clientes\n\n1\. \*\*/);
   assert.match(toShortText({ client: '', data, results, summary }), /Principais problemas:/);
 });

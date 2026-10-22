@@ -139,13 +139,15 @@ test('prompt da IA leva só o checklist e proíbe inventar dados', () => {
 });
 
 test('relatório .md de outro módulo usa o título e inclui o texto da IA', () => {
-  const results = [{ id: 'I1', group: 'engajamento', name: 'X', status: 'bad', found: 'f', why: 'w' }];
+  const results = [{ id: 'I1', group: 'engajamento', name: 'X', status: 'bad', found: 'f', problem: 'P', cost: 'C', fix: 'F', weight: 5 }];
   const summary = summarize(results, IG_GROUPS, igHeadline);
   const md = toMarkdown({ client: 'Acme', data: { url: 'https://www.instagram.com/acme/' }, results, summary, date: '2026-10-22', ctx: { title: 'Diagnóstico rápido do Instagram', groups: IG_GROUPS }, bigSentence: 'A cada 100 seguidores...', ai: 'Texto da IA' });
   assert.match(md, /# Diagnóstico rápido do Instagram — Acme/);
   assert.match(md, /## Engajamento — Ruim/);
   assert.match(md, /Resumo para a conversa \(gerado por IA\)/);
   assert.match(md, /Texto da IA/);
+  assert.match(md, /O que isso causa: C/);
+  assert.match(md, /Como resolver: F/);
 });
 
 test('IA: chama a API compatível com OpenAI com chave, modelo e mensagens', async () => {

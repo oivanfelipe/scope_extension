@@ -133,12 +133,16 @@ const NO_READ = 'Não conseguimos ler os anúncios. Role a página para carregá
 export const AD_CHECKS = [
   {
     id: 'A1', group: 'presenca', name: 'Está anunciando agora',
-    why: 'Sem anúncios ativos, a empresa depende só de quem já a conhece. Os concorrentes que anunciam ficam com os clientes novos.',
+    weight: 10, problem: "Não está anunciando agora",
+    cost: "Sem anúncios ativos, a empresa depende só de quem já a conhece, e os concorrentes que anunciam ficam com os clientes novos.",
+    fix: "Colocar no ar uma campanha simples de captação de contatos.",
     run: (a) => (a.analyzed === 0 ? na(NO_READ) : a.active > 0 ? ok(`${a.active} anúncio(s) ativo(s) encontrados.`) : bad('Não há anúncios ativos na Biblioteca de Anúncios.')),
   },
   {
     id: 'A2', group: 'presenca', name: 'Tem volume de anúncios',
-    why: 'Poucos anúncios significam pouco teste. Quem anuncia bem testa várias mensagens ao mesmo tempo.',
+    weight: 7, problem: "Poucos anúncios no ar",
+    cost: "Poucos anúncios significam pouco teste de mensagem e de público; fica difícil descobrir o que convence.",
+    fix: "Criar variações de texto e imagem para testar lado a lado.",
     run: (a) => {
       if (a.analyzed === 0) return na(NO_READ);
       const t = `${a.active} anúncio(s) ativo(s) lidos${a.totalText ? ` (a Biblioteca informa cerca de ${a.totalText} resultados)` : ''}. Ideal: 8 ou mais.`;
@@ -147,7 +151,9 @@ export const AD_CHECKS = [
   },
   {
     id: 'A3', group: 'criativos', name: 'Testa mensagens diferentes',
-    why: 'Repetir o mesmo texto em todos os anúncios impede descobrir o que realmente convence o cliente.',
+    weight: 6, problem: "Repete a mesma mensagem",
+    cost: "Repetir o mesmo texto impede descobrir o que realmente convence o cliente.",
+    fix: "Testar ao menos 4 mensagens diferentes (dor, prova, oferta e objeção).",
     run: (a) => {
       if (a.copyCount === 0) return na('Não foi possível ler os textos dos anúncios.');
       const t = `${a.uniqueCopies} texto(s) diferentes em ${a.copyCount} anúncios lidos.`;
@@ -156,7 +162,9 @@ export const AD_CHECKS = [
   },
   {
     id: 'A4', group: 'criativos', name: 'Usa vídeo nos anúncios',
-    why: 'O vídeo prende mais atenção no feed e nos Stories do que a imagem parada.',
+    weight: 5, problem: "Não usa vídeo",
+    cost: "O vídeo prende mais atenção no feed e nos Stories do que a imagem parada; sem ele, o anúncio perde espaço para os concorrentes.",
+    fix: "Gravar vídeos curtos de 15 a 30 segundos mostrando o serviço e o atendimento.",
     run: (a) => {
       if (a.videoShare == null) return na(NO_READ);
       const t = `${pct(a.videoShare)} dos anúncios lidos usam vídeo.`;
@@ -165,7 +173,9 @@ export const AD_CHECKS = [
   },
   {
     id: 'A5', group: 'estrategia', name: 'Mantém no ar o que funciona',
-    why: 'Anúncio que roda há semanas costuma ser o que dá resultado, pois ninguém paga por muito tempo o que não vende.',
+    weight: 4, problem: "Nenhum anúncio se mantém no ar",
+    cost: "Anúncio que roda há semanas costuma ser o que dá resultado; se nenhum fica no ar, pode ser que nenhum esteja funcionando.",
+    fix: "Identificar o que gera contato, manter esses anúncios e ajustar o resto.",
     run: (a) => {
       if (a.longestDays == null) return na('Não foi possível ler as datas de início dos anúncios.');
       const t = `O anúncio mais antigo está no ar há ${a.longestDays} dia(s).`;
@@ -174,7 +184,9 @@ export const AD_CHECKS = [
   },
   {
     id: 'A6', group: 'estrategia', name: 'Renova os anúncios',
-    why: 'Anúncios antigos cansam o público. É preciso criar novos com frequência.',
+    weight: 6, problem: "Não renova os anúncios",
+    cost: "O público se cansa de ver sempre o mesmo anúncio, e o custo por contato tende a subir.",
+    fix: "Lançar anúncios novos a cada 2 a 4 semanas.",
     run: (a) => {
       if (a.newestDays == null) return na('Não foi possível ler as datas de início dos anúncios.');
       const t = `O anúncio mais recente começou há ${a.newestDays} dia(s).`;
@@ -183,7 +195,9 @@ export const AD_CHECKS = [
   },
   {
     id: 'A7', group: 'estrategia', name: 'Leva o cliente para um destino claro',
-    why: 'Anúncio sem destino claro (site, WhatsApp ou formulário) gasta dinheiro sem gerar contato.',
+    weight: 8, problem: "Destino dos anúncios pouco claro",
+    cost: "Anúncio sem destino claro gasta verba sem gerar contato.",
+    fix: "Levar cada anúncio para uma página ou conversa de WhatsApp pensada para aquela oferta.",
     run: (a) => {
       if (a.destShare == null) return na(NO_READ);
       if (a.destShare === 0) return na('Não foi possível identificar o destino dos anúncios.');
@@ -204,6 +218,6 @@ export function runAdChecks(a) {
   return AD_CHECKS.map((c) => {
     let res;
     try { res = c.run(a); } catch (e) { res = na(`Erro na verificação: ${e.message}`); }
-    return { id: c.id, group: c.group, name: c.name, why: c.why, ...res };
+    return { id: c.id, group: c.group, name: c.name, problem: c.problem, cost: c.cost, fix: c.fix, weight: c.weight, ...res };
   });
 }

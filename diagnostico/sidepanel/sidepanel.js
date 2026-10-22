@@ -1,6 +1,6 @@
 import { collectPage } from '../lib/collector.js';
 import { fetchRobots, fetchSitemap } from '../lib/network.js';
-import { LEVEL_LABEL, SPEED_LIMITS, fmtSeconds, mainSpeedMs, runChecks, speedLevel, summarize } from '../lib/checks.js';
+import { LEVEL_LABEL, SPEED_LIMITS, fmtSeconds, mainSpeedMs, runChecks, speedLevel, summarize, topLosses } from '../lib/checks.js';
 import { CONTEXTS, detectContext } from '../lib/contexts.js';
 import { analyzeIg, collectInstagram, engagementBenchmark, parsePostHtml, runIgChecks } from '../lib/instagram.js';
 import { analyzeAds, collectAdLibrary, runAdChecks } from '../lib/adlibrary.js';
@@ -22,7 +22,7 @@ const state = { run: null, client: '', history: [], previous: null, running: fal
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
-const ICON = { ok: '✅', warn: '⚠️', bad: '❌', na: '➖' };
+const SYM = { ok: '✓', warn: '!', bad: '✕', na: '–' };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const fmtPct = (n) => n.toFixed(1).replace('.', ',');
 
@@ -49,6 +49,17 @@ const runIn = async (tab, func, args = []) => (await chrome.scripting.executeScr
 
 // ------------------------------------------------------------------ Módulos
 
+const SPEED_CONTEXT = {
+  bad: 'Na prática: quem chega por um anúncio ou pelo Google e espera tanto tempo tende a fechar a página antes de ver a sua oferta. Você paga pelo clique e perde o visitante.',
+  warn: 'Na prática: o site está acima do ideal. Parte dos visitantes, principalmente no celular, pode desistir antes de ver a oferta.',
+  ok: 'Na prática: o site abre rápido, o que ajuda a manter o visitante na página e o Google a valorizar o site.',
+};
+const ENGAGEMENT_CONTEXT = {
+  bad: 'Na prática: o perfil tem seguidores, mas só uma pequena parte reage. O Instagram entrega os posts para cada vez menos gente.',
+  warn: 'Na prática: há espaço para o conteúdo gerar mais reação, o que aumenta o alcance de cada post.',
+  ok: 'Na prática: a audiência reage bem ao conteúdo, o que ajuda cada post a chegar a mais gente.',
+};
+
 async function runSite(tab) {
   showState('Analisando o site…', 'Leva alguns segundos. Mantenha a aba aberta.');
   const data = await runIn(tab, collectPage);
@@ -60,7 +71,7 @@ async function runSite(tab) {
   return {
     data, results, key: data.host,
     big: ms == null ? { label: 'Tempo de carregamento', value: null, sentence: 'Não foi possível medir. Use "Medir velocidade de novo".', level: 'na' }
-      : { label: 'Tempo para o site aparecer', value: `${fmtSeconds(ms)}`, unit: ' segundos', sentence: speedSentence(ms), level: speedLevel(ms), barMs: ms, hint: 'Medido neste computador. Para a medição mais fiel, use "Medir velocidade de novo".' },
+      : { label: 'Tempo para o site aparecer', value: `${fmtSeconds(ms)}`, unit: ' segundos', sentence: speedSentence(ms), level: speedLevel(ms), barMs: ms, context: SPEED_CONTEXT[speedLevel(ms)], hint: 'Medido neste computador. Para a medição mais fiel, use "Medir velocidade de novo".' },
     historyText: ms == null ? null : `${fmtSeconds(ms)} s`,
   };
 }
@@ -92,6 +103,7 @@ async function runInstagram(tab) {
     big = {
       label: 'Taxa de engajamento', value: fmtPct(a.engagementPct), unit: '%', level,
       sentence: `A cada 100 seguidores, cerca de ${fmtPct(a.engagementPct)} interagem (curtem ou comentam) em cada post. ${level === 'ok' ? 'Isso é bom.' : level === 'warn' ? 'Há espaço para melhorar.' : 'Isso é baixo para o porte do perfil.'}`,
+      context: ENGAGEMENT_CONTEXT[level],
       hint: `Calculado com ${a.sampled} posts recentes e ${a.followers.toLocaleString('pt-BR')} seguidores. Referência de mercado aproximada.`,
     };
   }
@@ -110,6 +122,7 @@ async function runAds(tab) {
       ? { label: 'Anúncios ativos', value: null, sentence: 'Não conseguimos ler anúncios. Abra a Biblioteca de Anúncios do anunciante, role a página para carregar e reanalise.', level: 'na' }
       : { label: 'Anúncios ativos lidos', value: String(a.active), unit: a.active === 1 ? ' anúncio' : ' anúncios', level: a.active >= 8 ? 'ok' : a.active >= 3 ? 'warn' : 'bad',
         sentence: a.active ? `A empresa tem ${a.active} anúncio(s) ativo(s) entre os ${a.analyzed} lidos na tela.` : 'A empresa não tem anúncios ativos na Meta neste momento.',
+        context: a.active === 0 ? 'Na prática: sem anúncios ativos, a empresa depende só de quem já a conhece, e os concorrentes que anunciam ficam com os clientes novos.' : a.active < 8 ? 'Na prática: poucos anúncios significam pouco teste. Quem anuncia bem coloca várias mensagens no ar ao mesmo tempo e descobre qual convence mais.' : 'Na prática: há volume saudável de anúncios para testar mensagens diferentes.',
         hint: 'Quanto mais você rolar a página antes de analisar, mais completa fica a leitura. A Biblioteca não mostra gasto nem resultados.' },
     historyText: a.analyzed ? `${a.active} ativos` : null,
   };
@@ -178,6 +191,7 @@ function bigCard() {
     <div class="label">${esc(big.label)}</div>
     <div class="num">${esc(big.value)}<small>${esc(big.unit || '')}</small></div>
     <p>${esc(big.sentence)}</p>${bar}
+    ${big.context ? `<p class="ctx">${esc(big.context)}</p>` : ''}
     ${big.hint ? `<p class="hint">${esc(big.hint)}</p>` : ''}
   </section>`;
 }
@@ -187,19 +201,38 @@ function heroCard() {
   return `<section class="card hero ${o.level}">
     <div class="big">${o.ok}<small> de ${o.total} itens estão bons</small></div>
     <p>${esc(o.headline)}</p>
-    <div class="counts"><span>❌ ${o.bad} ruins</span><span>⚠️ ${o.warn} em atenção</span><span>✅ ${o.ok} bons</span></div>
+    <div class="counts"><span>✕ ${o.bad} ruins</span><span>! ${o.warn} em atenção</span><span>✓ ${o.ok} bons</span></div>
   </section>`;
+}
+
+function itemCard(r) {
+  return `<div class="item ${r.status}"><span class="dot ${r.status}" aria-hidden="true">${SYM[r.status]}</span><div><h3>${esc(r.problem)}</h3>
+    <div class="row"><small>O que encontramos</small><p>${esc(r.found)}</p></div>
+    <div class="row cost"><small>O que isso causa</small><p>${esc(r.cost)}</p></div>
+    <div class="row fix"><small>Como resolver</small><p>${esc(r.fix)}</p></div></div></div>`;
 }
 
 function groupCard(g) {
   const gs = state.run.summary.groups[g.id];
-  const order = { bad: 0, warn: 1, na: 2, ok: 3 };
-  const items = state.run.results.filter((r) => r.group === g.id).sort((a, b) => order[a.status] - order[b.status]);
+  const items = state.run.results.filter((r) => r.group === g.id);
+  const issues = items.filter((r) => r.status === 'bad' || r.status === 'warn').sort((a, b) => (a.status === b.status ? (b.weight ?? 0) - (a.weight ?? 0) : a.status === 'bad' ? -1 : 1));
+  const goods = items.filter((r) => r.status === 'ok');
+  const unknown = items.filter((r) => r.status === 'na');
+  const row = (r, sym) => `<li><span class="dot ${r.status}" aria-hidden="true">${sym}</span><div><b>${esc(r.name)}</b><span>${esc(r.found)}</span></div></li>`;
   return `<section class="card group">
     <h2>${esc(g.name)} <span class="badge ${gs.level}">${LEVEL_LABEL[gs.level] || 'Sem dados'}${gs.total ? ` · ${gs.ok}/${gs.total}` : ''}</span></h2>
     <p class="sub">${esc(g.sub)}</p>
-    <ul class="items">${items.map((r) => `<li class="item ${r.status}"><span class="mark" aria-hidden="true">${ICON[r.status]}</span><div><b>${esc(r.name)}</b><span class="found">${esc(r.found)}</span>${r.status === 'bad' || r.status === 'warn' ? `<div class="why">Por que importa: ${esc(r.why)}</div>` : ''}</div></li>`).join('')}</ul>
+    ${issues.length ? `<div class="items">${issues.map(itemCard).join('')}</div>` : ''}
+    ${goods.length ? `<details class="goods" ${issues.length ? '' : 'open'}><summary>Ver o que está bom (${goods.length})</summary><ul>${goods.map((r) => row(r, SYM.ok)).join('')}</ul></details>` : ''}
+    ${unknown.length ? `<details class="goods unk"><summary>Não verificado (${unknown.length})</summary><ul>${unknown.map((r) => row(r, SYM.na)).join('')}</ul></details>` : ''}
   </section>`;
+}
+
+function lossCard() {
+  const losses = topLosses(state.run.results);
+  if (!losses.length) return '';
+  return `<section class="card loss"><span class="tag">Onde está perdendo clientes</span><p class="sub">Os ${losses.length === 1 ? 'ponto' : losses.length + ' pontos'} com maior impacto no negócio, em ordem.</p>
+    <ol>${losses.map((r, i) => `<li><span class="dot ${r.status}" aria-hidden="true">${i + 1}</span><div><b>${esc(r.problem)}</b><span>${esc(r.cost)}</span></div></li>`).join('')}</ol></section>`;
 }
 
 function historyCard() {
@@ -248,6 +281,7 @@ async function render() {
     </section>
     ${heroCard()}
     ${bigCard()}
+    ${lossCard()}
     ${ctx.groups.map(groupCard).join('')}
     ${others}
     <div class="tools">
@@ -263,7 +297,7 @@ async function render() {
 
 function reportInput() {
   const { ctx, data, results, summary, big } = state.run;
-  return { client: state.client.trim(), data, results, summary, date: today(), ctx, bigSentence: big.sentence, ai: state.ai.text };
+  return { client: state.client.trim(), data, results, summary, date: today(), ctx, bigSentence: big.sentence, bigContext: big.context, ai: state.ai.text };
 }
 
 function download(name, text, mime) {

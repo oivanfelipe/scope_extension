@@ -139,7 +139,9 @@ const na = (found) => ({ status: 'na', found });
 export const IG_CHECKS = [
   {
     id: 'I1', group: 'engajamento', name: 'Os seguidores reagem aos posts',
-    why: 'Muitos seguidores sem curtidas e comentários significam audiência que não vê ou não se interessa.',
+    weight: 9, problem: "Os seguidores reagem pouco aos posts",
+    cost: "Muitos seguidores sem curtidas e comentários indicam audiência que não vê ou não se interessa, e o alcance cai.",
+    fix: "Testar chamadas para comentar, enquetes e conteúdos que respondam dúvidas reais dos clientes.",
     run: (a) => {
       if (a.engagementPct == null) return na('Não foi possível calcular a taxa de engajamento.');
       const [good, mid] = engagementBenchmark(a.followers);
@@ -149,7 +151,9 @@ export const IG_CHECKS = [
   },
   {
     id: 'I2', group: 'engajamento', name: 'Os posts geram conversa',
-    why: 'Comentários mostram interesse real e ajudam o Instagram a entregar o post para mais gente.',
+    weight: 6, problem: "Os posts quase não geram conversa",
+    cost: "Comentários mostram interesse real e ajudam o Instagram a entregar o post para mais gente.",
+    fix: "Fechar os posts com uma pergunta e responder todos os comentários nas primeiras horas.",
     run: (a) => {
       if (a.avgComments == null) return na('Não foi possível ler os comentários.');
       const t = `Média de ${fmtPct(a.avgComments)} comentários por post.`;
@@ -158,7 +162,9 @@ export const IG_CHECKS = [
   },
   {
     id: 'I3', group: 'frequencia', name: 'Publica com frequência',
-    why: 'Perfis que postam pouco perdem alcance e passam a imagem de empresa parada.',
+    weight: 7, problem: "Publica pouco",
+    cost: "Perfis que postam pouco perdem alcance e passam imagem de empresa parada.",
+    fix: "Montar um calendário semanal com 3 ou mais posts por semana.",
     run: (a) => {
       if (a.perWeek == null) return na('Poucos posts com data para calcular a frequência.');
       const t = `Cerca de ${fmtPct(a.perWeek)} posts por semana (ideal: 3 ou mais).`;
@@ -167,7 +173,9 @@ export const IG_CHECKS = [
   },
   {
     id: 'I4', group: 'frequencia', name: 'Postou recentemente',
-    why: 'Um perfil sem post recente parece abandonado e o cliente desconfia.',
+    weight: 8, problem: "Sem post recente",
+    cost: "Um perfil sem post recente parece abandonado, e quem pesquisa a empresa antes de comprar desconfia.",
+    fix: "Voltar a um ritmo fixo de publicação, retomando com um post de bastidores.",
     run: (a) => {
       if (a.daysSinceLast == null) return na('Não foi possível ler a data do último post.');
       const t = a.daysSinceLast === 0 ? 'O último post foi hoje.' : `O último post foi há ${a.daysSinceLast} dia(s).`;
@@ -176,7 +184,9 @@ export const IG_CHECKS = [
   },
   {
     id: 'I5', group: 'perfil', name: 'Usa vídeos curtos (Reels)',
-    why: 'Os Reels são o formato que mais alcança quem ainda não segue o perfil.',
+    weight: 6, problem: "Não usa Reels",
+    cost: "Os Reels são o formato que mais alcança quem ainda não segue o perfil; sem eles, o crescimento fica limitado a quem já conhece a empresa.",
+    fix: "Publicar ao menos 1 Reels por semana, com bastidores e dúvidas frequentes.",
     run: (a) => {
       if (a.reelShare == null) return na('Não foi possível identificar os formatos.');
       const t = `${Math.round(a.reelShare * 100)}% dos posts analisados são Reels.`;
@@ -185,7 +195,9 @@ export const IG_CHECKS = [
   },
   {
     id: 'I6', group: 'perfil', name: 'Tem link na bio',
-    why: 'Sem link na bio, quem se interessa não tem para onde ir e o perfil não gera contato.',
+    weight: 7, problem: "Sem link na bio",
+    cost: "Quem se interessa não tem para onde ir, e o perfil não gera contato nem venda.",
+    fix: "Colocar na bio um link para o WhatsApp ou para uma página de contato.",
     run: (a) => (a.bioLink ? ok('O perfil tem link na bio.') : bad('Não encontramos link na bio.')),
   },
 ];
@@ -201,6 +213,6 @@ export function runIgChecks(a) {
   return IG_CHECKS.map((c) => {
     let res;
     try { res = c.run(a); } catch (e) { res = na(`Erro na verificação: ${e.message}`); }
-    return { id: c.id, group: c.group, name: c.name, why: c.why, ...res };
+    return { id: c.id, group: c.group, name: c.name, problem: c.problem, cost: c.cost, fix: c.fix, weight: c.weight, ...res };
   });
 }
