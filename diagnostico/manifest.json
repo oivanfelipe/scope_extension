@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Diagnóstico Rápido · V4",
   "short_name": "Diagnóstico",
-  "version": "0.1.0",
-  "description": "Checklist objetivo do site aberto (velocidade, estrutura, rastreamento e conversão) para usar em reunião de venda.",
+  "version": "0.2.0",
+  "description": "Checklist objetivo do site, do Instagram e dos anúncios do cliente para usar em reunião de venda, com resumo opcional por IA.",
   "minimum_chrome_version": "116",
   "icons": {
     "16": "assets/icons/icon16.png",

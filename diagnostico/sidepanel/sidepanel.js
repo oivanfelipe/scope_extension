@@ -1,6 +1,10 @@
 import { collectPage } from '../lib/collector.js';
 import { fetchRobots, fetchSitemap } from '../lib/network.js';
-import { GROUPS, LEVEL_LABEL, SPEED_LIMITS, fmtSeconds, mainSpeedMs, runChecks, speedLevel, summarize } from '../lib/checks.js';
+import { LEVEL_LABEL, SPEED_LIMITS, fmtSeconds, mainSpeedMs, runChecks, speedLevel, summarize } from '../lib/checks.js';
+import { CONTEXTS, detectContext } from '../lib/contexts.js';
+import { analyzeIg, collectInstagram, engagementBenchmark, parsePostHtml, runIgChecks } from '../lib/instagram.js';
+import { analyzeAds, collectAdLibrary, runAdChecks } from '../lib/adlibrary.js';
+import { PROVIDERS, buildMessages, generateSummary, listModels, loadAi, saveAi } from '../lib/ai.js';
 import { fileStem, speedSentence, toMarkdown, toShortText } from '../lib/report.js';
 import { addEntry, loadHost, saveClient } from '../lib/storage.js';
 
@@ -13,13 +17,14 @@ const fullBtn = $('#fullscreen');
 const forcedTabId = new URLSearchParams(location.search).get('tabId'); // aba grande aberta pelo botão "Tela grande"
 if (forcedTabId) fullBtn.hidden = true;
 
-const state = { data: null, results: [], summary: null, client: '', history: [], running: false, analyzedUrl: null };
+// state.run = { ctx, key, data, results, summary, big }  ·  big = { label, value, sentence, level, bar? }
+const state = { run: null, client: '', history: [], previous: null, running: false, analyzedUrl: null, ai: { text: '', loading: false, error: '' } };
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const ICON = { ok: '✅', warn: '⚠️', bad: '❌', na: '➖' };
-const isAnalyzable = (url) => /^https?:\/\//i.test(url || '') && !/^https:\/\/(chrome\.google\.com\/webstore|chromewebstore\.google\.com)/i.test(url);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const fmtPct = (n) => n.toFixed(1).replace('.', ',');
 
 async function getTargetTab() {
   if (forcedTabId) return chrome.tabs.get(Number(forcedTabId));
@@ -40,6 +45,78 @@ function toast(text) {
   setTimeout(() => el.remove(), 2200);
 }
 
+const runIn = async (tab, func, args = []) => (await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func, args }))[0]?.result;
+
+// ------------------------------------------------------------------ Módulos
+
+async function runSite(tab) {
+  showState('Analisando o site…', 'Leva alguns segundos. Mantenha a aba aberta.');
+  const data = await runIn(tab, collectPage);
+  if (!data) throw new Error('A página não devolveu dados. Recarregue a aba e tente de novo.');
+  const net = { robots: await fetchRobots(data.origin) };
+  net.sitemap = await fetchSitemap(data.origin, net.robots.sitemaps);
+  const results = runChecks(data, net);
+  const ms = mainSpeedMs(data);
+  return {
+    data, results, key: data.host,
+    big: ms == null ? { label: 'Tempo de carregamento', value: null, sentence: 'Não foi possível medir. Use "Medir velocidade de novo".', level: 'na' }
+      : { label: 'Tempo para o site aparecer', value: `${fmtSeconds(ms)}`, unit: ' segundos', sentence: speedSentence(ms), level: speedLevel(ms), barMs: ms, hint: 'Medido neste computador. Para a medição mais fiel, use "Medir velocidade de novo".' },
+    historyText: ms == null ? null : `${fmtSeconds(ms)} s`,
+  };
+}
+
+async function runInstagram(tab) {
+  showState('Lendo o perfil do Instagram…', 'Leva cerca de 10 a 20 segundos. Mantenha a aba aberta.');
+  const profile = await runIn(tab, collectInstagram);
+  if (!profile?.isProfile) { const e = new Error('Abra o perfil que quer analisar (instagram.com/nome-do-perfil) e clique em Reanalisar.'); e.title = 'Abra um perfil do Instagram'; throw e; }
+  if (profile.isPrivate) { const e = new Error('Este perfil é privado: não dá para ler os posts.'); e.title = 'Perfil privado'; throw e; }
+  const links = profile.postLinks.slice(0, 12);
+  const posts = [];
+  for (let i = 0; i < links.length; i++) {
+    showState('Lendo o perfil do Instagram…', `Lendo post ${i + 1} de ${links.length}. Mantenha a aba aberta.`);
+    try {
+      const html = await runIn(tab, async (u) => (await (await fetch(u, { credentials: 'include' })).text()).slice(0, 150000), [links[i]]);
+      const p = html && parsePostHtml(links[i], html);
+      if (p) posts.push(p);
+    } catch { /* post ignorado */ }
+    await sleep(600);
+  }
+  const a = analyzeIg(profile, posts);
+  const results = runIgChecks(a);
+  const data = { ...profile, url: profile.url, host: `instagram.com/${profile.handle}` };
+  let big;
+  if (a.engagementPct == null) big = { label: 'Taxa de engajamento', value: null, sentence: 'Não foi possível calcular a taxa de engajamento. Role o perfil para carregar posts e reanalise.', level: 'na' };
+  else {
+    const [good, mid] = engagementBenchmark(a.followers);
+    const level = a.engagementPct >= good ? 'ok' : a.engagementPct >= mid ? 'warn' : 'bad';
+    big = {
+      label: 'Taxa de engajamento', value: fmtPct(a.engagementPct), unit: '%', level,
+      sentence: `A cada 100 seguidores, cerca de ${fmtPct(a.engagementPct)} interagem (curtem ou comentam) em cada post. ${level === 'ok' ? 'Isso é bom.' : level === 'warn' ? 'Há espaço para melhorar.' : 'Isso é baixo para o porte do perfil.'}`,
+      hint: `Calculado com ${a.sampled} posts recentes e ${a.followers.toLocaleString('pt-BR')} seguidores. Referência de mercado aproximada.`,
+    };
+  }
+  return { data, results, key: data.host, big, historyText: a.engagementPct == null ? null : `${fmtPct(a.engagementPct)}%`, notes: posts.length === 0 ? 'Nenhum post pôde ser lido. Confirme que está logado no Instagram e role o perfil.' : '' };
+}
+
+async function runAds(tab) {
+  showState('Lendo a Biblioteca de Anúncios…', 'Leitura dos anúncios que já estão carregados na tela.');
+  const raw = await runIn(tab, collectAdLibrary);
+  const a = analyzeAds(raw);
+  const results = runAdChecks(a);
+  const data = { url: raw.url, host: raw.key, tracking: {} };
+  return {
+    data, results, key: raw.key,
+    big: a.analyzed === 0
+      ? { label: 'Anúncios ativos', value: null, sentence: 'Não conseguimos ler anúncios. Abra a Biblioteca de Anúncios do anunciante, role a página para carregar e reanalise.', level: 'na' }
+      : { label: 'Anúncios ativos lidos', value: String(a.active), unit: a.active === 1 ? ' anúncio' : ' anúncios', level: a.active >= 8 ? 'ok' : a.active >= 3 ? 'warn' : 'bad',
+        sentence: a.active ? `A empresa tem ${a.active} anúncio(s) ativo(s) entre os ${a.analyzed} lidos na tela.` : 'A empresa não tem anúncios ativos na Meta neste momento.',
+        hint: 'Quanto mais você rolar a página antes de analisar, mais completa fica a leitura. A Biblioteca não mostra gasto nem resultados.' },
+    historyText: a.analyzed ? `${a.active} ativos` : null,
+  };
+}
+
+const RUNNERS = { site: runSite, instagram: runInstagram, ads: runAds };
+
 // ------------------------------------------------------------------ Análise
 
 async function analyze() {
@@ -49,38 +126,23 @@ async function analyze() {
   banner.hidden = true;
   try {
     const tab = await getTargetTab();
-    if (!tab || !isAnalyzable(tab.url)) {
-      showState('Esta aba não pode ser analisada', 'Abra o site do cliente (um endereço http ou https; não vale chrome://, Chrome Web Store ou nova aba) e clique em Reanalisar.');
-      return;
-    }
-    showState('Analisando o site…', 'Leva alguns segundos. Mantenha a aba aberta.');
-    let data;
-    try {
-      const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: collectPage });
-      data = res?.result;
-    } catch (e) {
-      showState('Não consegui ler a página', `${e.message || e}. Se a aba acabou de abrir, aguarde o carregamento e tente de novo.`);
-      return;
-    }
-    if (!data) { showState('Não consegui ler a página', 'A página não devolveu dados. Recarregue a aba e tente de novo.'); return; }
+    const ctxId = tab && detectContext(tab.url);
+    if (!ctxId) { showState('Esta aba não pode ser analisada', 'Abra o site do cliente, o perfil do Instagram ou a Biblioteca de Anúncios (um endereço http ou https; não vale chrome://, Chrome Web Store ou nova aba) e clique em Reanalisar.'); return; }
+    const ctx = CONTEXTS[ctxId];
+    let out;
+    try { out = await RUNNERS[ctxId](tab); } catch (e) { showState(e.title || 'Não consegui ler a página', e.title ? e.message : `${e.message || e}. Se a aba acabou de abrir, aguarde o carregamento e tente de novo.`); return; }
 
-    const net = {};
-    net.robots = await fetchRobots(data.origin);
-    net.sitemap = await fetchSitemap(data.origin, net.robots.sitemaps);
-
-    state.data = data;
-    state.results = runChecks(data, net);
-    state.summary = summarize(state.results);
+    const summary = summarize(out.results, ctx.groups, ctx.headline);
+    state.run = { ctx, key: out.key, data: out.data, results: out.results, summary, big: out.big, notes: out.notes || '' };
     state.analyzedUrl = tab.url;
+    state.ai = { text: '', loading: false, error: '' };
 
-    const saved = await loadHost(data.host);
+    const saved = await loadHost(out.key);
     state.client = saved.client || '';
-    const previous = saved.entries[0] || null;
-    const items = Object.fromEntries(state.results.map((r) => [r.id, r.status]));
-    const o = state.summary.overall;
-    const after = await addEntry(data.host, { ts: Date.now(), url: data.url, ok: o.ok, total: o.total, speedMs: mainSpeedMs(data), items });
+    state.previous = saved.entries[0] || null;
+    const o = summary.overall;
+    const after = await addEntry(out.key, { ts: Date.now(), url: out.data.url, ok: o.ok, total: o.total, bigText: out.historyText, items: Object.fromEntries(out.results.map((r) => [r.id, r.status])) });
     state.history = after.entries;
-    state.previous = previous;
     render();
   } catch (e) {
     showState('Algo deu errado', String(e.message || e));
@@ -90,10 +152,10 @@ async function analyze() {
   }
 }
 
-/** Recarrega a aba sem cache e mede de novo: dá a medição mais fiel do tempo de carregamento. */
+/** Recarrega a aba sem cache e mede de novo: medição mais fiel do tempo de carregamento (só no site). */
 async function remeasure() {
   const tab = await getTargetTab();
-  if (!tab || !isAnalyzable(tab.url)) return;
+  if (!tab) return;
   showState('Recarregando o site para medir a velocidade…', 'Aguarde até a página terminar de carregar.');
   await new Promise((resolve) => {
     const done = (id, info) => { if (id === tab.id && info.status === 'complete') { chrome.tabs.onUpdated.removeListener(done); resolve(); } };
@@ -107,23 +169,21 @@ async function remeasure() {
 
 // ------------------------------------------------------------------ Tela
 
-function speedCard() {
-  const ms = mainSpeedMs(state.data);
-  const lvl = speedLevel(ms);
-  if (ms == null) return `<section class="card speed"><div class="label">Tempo de carregamento</div><p>Não foi possível medir. Use "Medir velocidade de novo".</p></section>`;
-  const pos = Math.min(100, (ms / 6000) * 100);
-  return `<section class="card speed ${lvl}">
-    <div class="label">Tempo para o site aparecer</div>
-    <div class="num">${fmtSeconds(ms)}<small> segundos</small></div>
-    <p>${esc(speedSentence(ms))}</p>
-    <div class="bar" role="img" aria-label="Escala de 0 a 6 segundos"><i style="left:${pos}%"></i></div>
-    <div class="bar-scale"><span>0 s</span><span>${fmtSeconds(SPEED_LIMITS.OK_MS)} s ideal</span><span>${fmtSeconds(SPEED_LIMITS.WARN_MS)} s</span><span>6 s+</span></div>
-    <p class="hint">Medido neste computador. Para a medição mais fiel, use "Medir velocidade de novo".</p>
+function bigCard() {
+  const { big } = state.run;
+  if (big.value == null) return `<section class="card speed"><div class="label">${esc(big.label)}</div><p>${esc(big.sentence)}</p></section>`;
+  const bar = big.barMs == null ? '' : `<div class="bar" role="img" aria-label="Escala de 0 a 6 segundos"><i style="left:${Math.min(100, (big.barMs / 6000) * 100)}%"></i></div>
+    <div class="bar-scale"><span>0 s</span><span>${fmtSeconds(SPEED_LIMITS.OK_MS)} s ideal</span><span>${fmtSeconds(SPEED_LIMITS.WARN_MS)} s</span><span>6 s+</span></div>`;
+  return `<section class="card speed ${big.level}">
+    <div class="label">${esc(big.label)}</div>
+    <div class="num">${esc(big.value)}<small>${esc(big.unit || '')}</small></div>
+    <p>${esc(big.sentence)}</p>${bar}
+    ${big.hint ? `<p class="hint">${esc(big.hint)}</p>` : ''}
   </section>`;
 }
 
 function heroCard() {
-  const o = state.summary.overall;
+  const o = state.run.summary.overall;
   return `<section class="card hero ${o.level}">
     <div class="big">${o.ok}<small> de ${o.total} itens estão bons</small></div>
     <p>${esc(o.headline)}</p>
@@ -132,19 +192,18 @@ function heroCard() {
 }
 
 function groupCard(g) {
-  const gs = state.summary.groups[g.id];
-  const items = state.results.filter((r) => r.group === g.id);
+  const gs = state.run.summary.groups[g.id];
   const order = { bad: 0, warn: 1, na: 2, ok: 3 };
-  items.sort((a, b) => order[a.status] - order[b.status]);
+  const items = state.run.results.filter((r) => r.group === g.id).sort((a, b) => order[a.status] - order[b.status]);
   return `<section class="card group">
-    <h2>${esc(g.name)} <span class="badge ${gs.level}">${LEVEL_LABEL[gs.level] || 'Sem dados'} · ${gs.ok}/${gs.total}</span></h2>
+    <h2>${esc(g.name)} <span class="badge ${gs.level}">${LEVEL_LABEL[gs.level] || 'Sem dados'}${gs.total ? ` · ${gs.ok}/${gs.total}` : ''}</span></h2>
     <p class="sub">${esc(g.sub)}</p>
     <ul class="items">${items.map((r) => `<li class="item ${r.status}"><span class="mark" aria-hidden="true">${ICON[r.status]}</span><div><b>${esc(r.name)}</b><span class="found">${esc(r.found)}</span>${r.status === 'bad' || r.status === 'warn' ? `<div class="why">Por que importa: ${esc(r.why)}</div>` : ''}</div></li>`).join('')}</ul>
   </section>`;
 }
 
 function historyCard() {
-  const o = state.summary.overall;
+  const o = state.run.summary.overall;
   let delta = '';
   if (state.previous) {
     const diff = o.ok - state.previous.ok;
@@ -152,34 +211,59 @@ function historyCard() {
     delta = diff === 0 ? `<div class="delta">Sem mudança desde a análise de ${when}.</div>`
       : `<div class="delta ${diff > 0 ? 'up' : 'down'}">${diff > 0 ? '+' : ''}${diff} ${Math.abs(diff) === 1 ? 'item' : 'itens'} bons desde a análise de ${when}.</div>`;
   }
-  const rows = state.history.slice(0, 6).map((e) => `<li><span>${new Date(e.ts).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</span><span>${e.ok} de ${e.total} bons${e.speedMs != null ? ` · ${fmtSeconds(e.speedMs)} s` : ''}</span></li>`).join('');
-  return `<section class="card history"><h2>Histórico deste site</h2>${delta}<ul>${rows}</ul></section>`;
+  const rows = state.history.slice(0, 6).map((e) => `<li><span>${new Date(e.ts).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</span><span>${e.ok} de ${e.total} bons${e.bigText ? ` · ${esc(e.bigText)}` : ''}</span></li>`).join('');
+  return `<section class="card history"><h2>Histórico</h2>${delta}<ul>${rows}</ul></section>`;
 }
 
-function render() {
-  const { data } = state;
-  const others = data.tracking.others.length ? `<p class="others">Outras ferramentas encontradas: ${esc(data.tracking.others.join(', '))}.</p>` : '';
+function aiCard(settings) {
+  const { ai } = state;
+  const provider = settings.provider;
+  return `<section class="card ai">
+    <h2>Resumo para a conversa (IA)</h2>
+    ${ai.text ? `<div class="ai-text">${esc(ai.text)}</div>` : '<p class="sub">A IA escreve, em linguagem simples, os 3 pontos mais importantes e um próximo passo para a conversa com o cliente.</p>'}
+    ${ai.error ? `<p class="ai-error">${esc(ai.error)}</p>` : ''}
+    <div class="tools"><button class="btn btn-red" id="ai-go" type="button" ${ai.loading ? 'disabled' : ''}>${ai.loading ? 'Gerando…' : ai.text ? 'Gerar de novo' : 'Gerar resumo com IA'}</button>${ai.text ? '<button class="btn" id="ai-copy" type="button">Copiar resumo da IA</button>' : ''}</div>
+    <details class="settings" ${settings.apiKey ? '' : 'open'}><summary>Configurar IA</summary>
+      <label>Provedor <select id="ai-provider">${Object.entries(PROVIDERS).map(([k, p]) => `<option value="${k}" ${k === provider ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+      <label>Chave da API <input id="ai-key" type="password" autocomplete="off" value="${esc(settings.apiKey)}" placeholder="cole a sua chave"></label>
+      <label>Modelo <input id="ai-model" list="ai-models" value="${esc(settings.model)}" placeholder="${esc(PROVIDERS[provider].model)}"><datalist id="ai-models"></datalist></label>
+      <div class="tools"><button class="btn" id="ai-save" type="button">Salvar</button><button class="btn" id="ai-models-btn" type="button">Listar modelos</button></div>
+      <p class="hint">A chave fica só neste navegador. Enviamos à IA apenas o resultado do checklist (nomes e achados dos itens), nunca o conteúdo da página.</p>
+    </details>
+  </section>`;
+}
+
+async function render() {
+  const { ctx, data, notes } = state.run;
+  const settings = await loadAi();
+  const isSite = ctx.id === 'site';
+  const others = isSite && data.tracking.others.length ? `<p class="others">Outras ferramentas encontradas: ${esc(data.tracking.others.join(', '))}.</p>` : '';
+  const betaNote = ctx.beta ? `<div class="banner beta">Módulo em teste: a leitura depende da estrutura da página, que a plataforma pode mudar. Confira os números na tela antes de apresentar.</div>` : '';
   view.innerHTML = `
+    ${betaNote}
     <section class="card site">
       <input id="client" type="text" placeholder="Nome do cliente (opcional)" value="${esc(state.client)}" aria-label="Nome do cliente">
       <div class="url">${esc(data.url)}</div>
+      ${notes ? `<div class="url">${esc(notes)}</div>` : ''}
     </section>
     ${heroCard()}
-    ${speedCard()}
-    ${GROUPS.map(groupCard).join('')}
+    ${bigCard()}
+    ${ctx.groups.map(groupCard).join('')}
     ${others}
     <div class="tools">
-      <button class="btn btn-red" id="remeasure" type="button">Medir velocidade de novo</button>
+      ${isSite ? '<button class="btn btn-red" id="remeasure" type="button">Medir velocidade de novo</button>' : ''}
       <button class="btn" id="dl" type="button">Baixar .md</button>
       <button class="btn" id="copy" type="button">Copiar resumo</button>
     </div>
+    ${aiCard(settings)}
     ${historyCard()}`;
 }
 
 // ------------------------------------------------------------------ Ações
 
 function reportInput() {
-  return { client: state.client.trim(), data: state.data, results: state.results, summary: state.summary, date: today() };
+  const { ctx, data, results, summary, big } = state.run;
+  return { client: state.client.trim(), data, results, summary, date: today(), ctx, bigSentence: big.sentence, ai: state.ai.text };
 }
 
 function download(name, text, mime) {
@@ -191,18 +275,40 @@ function download(name, text, mime) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+const readAiForm = () => ({ provider: $('#ai-provider').value, apiKey: $('#ai-key').value.trim(), model: $('#ai-model').value.trim() });
+
 document.addEventListener('click', async (e) => {
   const id = e.target.closest('button')?.id;
-  if (id === 'dl') { download(`${fileStem(state.data.host, today())}.md`, toMarkdown(reportInput()), 'text/markdown'); toast('Arquivo baixado'); }
-  if (id === 'copy') {
-    try { await navigator.clipboard.writeText(toShortText(reportInput())); toast('Resumo copiado'); } catch { toast('Não foi possível copiar'); }
-  }
+  if (!id) return;
+  if (id === 'dl') { download(`${fileStem(state.run.data.host, today())}.md`, toMarkdown(reportInput()), 'text/markdown'); toast('Arquivo baixado'); }
+  if (id === 'copy') { try { await navigator.clipboard.writeText(toShortText(reportInput())); toast('Resumo copiado'); } catch { toast('Não foi possível copiar'); } }
+  if (id === 'ai-copy') { try { await navigator.clipboard.writeText(state.ai.text); toast('Resumo da IA copiado'); } catch { toast('Não foi possível copiar'); } }
   if (id === 'remeasure') remeasure();
   if (id === 'banner-go') analyze();
+  if (id === 'ai-save') { await saveAi(readAiForm()); toast('IA configurada'); }
+  if (id === 'ai-models-btn') {
+    try {
+      const models = await listModels(readAiForm());
+      $('#ai-models').innerHTML = models.map((m) => `<option value="${esc(m)}">`).join('');
+      toast(`${models.length} modelos encontrados: clique no campo Modelo`);
+    } catch (err) { toast(String(err.message || err).slice(0, 80)); }
+  }
+  if (id === 'ai-go') {
+    const form = $('#ai-key') ? readAiForm() : await loadAi();
+    await saveAi(form);
+    state.ai = { text: '', loading: true, error: '' };
+    await render();
+    try {
+      const { ctx, data, results, summary, big } = state.run;
+      state.ai = { text: await generateSummary(form, buildMessages({ ctx, client: state.client.trim(), data, results, summary, bigSentence: big.sentence })), loading: false, error: '' };
+    } catch (err) { state.ai = { text: '', loading: false, error: String(err.message || err) }; }
+    await render();
+  }
 });
 
 document.addEventListener('change', (e) => {
-  if (e.target.id === 'client' && state.data) { state.client = e.target.value; saveClient(state.data.host, state.client); }
+  if (e.target.id === 'client' && state.run) { state.client = e.target.value; saveClient(state.run.key, state.client); }
+  if (e.target.id === 'ai-provider') { const m = $('#ai-model'); m.value = ''; m.placeholder = PROVIDERS[e.target.value].model; }
 });
 
 rerunBtn.addEventListener('click', analyze);
@@ -215,7 +321,7 @@ fullBtn.addEventListener('click', async () => {
 async function checkTabChange() {
   if (state.running || !state.analyzedUrl) return;
   const tab = await getTargetTab().catch(() => null);
-  if (!tab || !isAnalyzable(tab.url) || tab.url === state.analyzedUrl) { banner.hidden = true; return; }
+  if (!tab || !detectContext(tab.url) || tab.url === state.analyzedUrl) { banner.hidden = true; return; }
   banner.hidden = false;
   banner.innerHTML = `<span>Você abriu outra página. O resultado abaixo é da página anterior.</span><button id="banner-go" class="btn btn-red" type="button">Analisar esta</button>`;
 }

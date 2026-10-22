@@ -11,15 +11,18 @@ export function speedSentence(ms) {
   return lvl === 'ok' ? `${base} Isso é bom.` : lvl === 'warn' ? `${base} Isso é lento: o ideal é até 2,5 segundos.` : `${base} Isso é ruim: o ideal é até 2,5 segundos.`;
 }
 
+const SITE_CTX = { title: 'Diagnóstico rápido do site', groups: GROUPS };
+
 /** Relatório em Markdown: o mesmo checklist da tela, para anexar à proposta. */
-export function toMarkdown({ client, data, results, summary, date }) {
+export function toMarkdown({ client, data, results, summary, date, ctx = SITE_CTX, bigSentence, ai }) {
   const o = summary.overall;
+  const sentence = bigSentence ?? speedSentence(mainSpeedMs(data));
   const L = [];
-  L.push(`# Diagnóstico rápido do site${client ? ` — ${client}` : ''}`, '');
-  L.push(`- **Site:** ${data.url}`, `- **Data:** ${date}`, '');
+  L.push(`# ${ctx.title}${client ? ` — ${client}` : ''}`, '');
+  L.push(`- **Endereço:** ${data.url}`, `- **Data:** ${date}`, '');
   L.push(`## Resultado: ${o.ok} de ${o.total} itens estão bons`, '', o.headline, '');
-  L.push(`> ${speedSentence(mainSpeedMs(data))}`, '');
-  for (const g of GROUPS) {
+  if (sentence) L.push(`> ${sentence}`, '');
+  for (const g of ctx.groups) {
     const gs = summary.groups[g.id];
     L.push(`## ${g.name} — ${LEVEL_LABEL[gs.level] || 'Sem dados'}`, `_${g.sub}_`, '');
     for (const r of results.filter((x) => x.group === g.id)) {
@@ -27,19 +30,20 @@ export function toMarkdown({ client, data, results, summary, date }) {
     }
     L.push('');
   }
-  if (data.tracking.others.length) L.push(`Outras ferramentas encontradas: ${data.tracking.others.join(', ')}.`, '');
-  L.push('---', '_Medição de velocidade feita no navegador de quem analisou; serve como indicativo. Itens de rastreamento e conversão são detectados na página aberta; o que só carrega após consentimento ou ação do usuário pode não aparecer._');
+  if (data.tracking?.others?.length) L.push(`Outras ferramentas encontradas: ${data.tracking.others.join(', ')}.`, '');
+  if (ai) L.push('## Resumo para a conversa (gerado por IA)', '', ai, '');
+  L.push('---', '_Itens detectados na página aberta, de forma automática; confira na tela antes de afirmar ao cliente. A velocidade é medida no navegador de quem analisou e serve como indicativo._');
   return L.join('\n');
 }
 
 /** Resumo curto para colar em conversa (WhatsApp, e-mail). */
-export function toShortText({ client, data, results, summary }) {
+export function toShortText({ client, data, results, summary, ctx = SITE_CTX, bigSentence }) {
   const o = summary.overall;
   const bads = results.filter((r) => r.status === 'bad').map((r) => `• ${r.name}`);
   return [
-    `Diagnóstico rápido${client ? ` — ${client}` : ''} (${data.host})`,
+    `${ctx.title}${client ? ` — ${client}` : ''} (${data.host})`,
     `${o.ok} de ${o.total} itens estão bons.`,
-    speedSentence(mainSpeedMs(data)),
+    bigSentence ?? speedSentence(mainSpeedMs(data)),
     bads.length ? `\nPrincipais problemas:\n${bads.slice(0, 8).join('\n')}` : '',
   ].filter(Boolean).join('\n');
 }

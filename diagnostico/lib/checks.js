@@ -217,8 +217,15 @@ export function runChecks(data, net = {}) {
 const levelOf = (pct) => (pct >= 0.75 ? 'ok' : pct >= 0.5 ? 'warn' : 'bad');
 const SCORE = { ok: 1, warn: 0.5, bad: 0 };
 
-/** Placar por área e geral. 'na' não entra na conta. */
-export function summarize(results) {
+export function siteHeadline(o) {
+  const fix = o.bad + o.warn;
+  return o.level === 'bad' ? `Seu site tem ${fix} pontos a corrigir que podem estar afastando clientes.`
+    : o.level === 'warn' ? `Seu site está razoável, mas tem ${fix} pontos a corrigir.`
+      : fix === 0 ? 'Seu site está bem estruturado.' : `Seu site está bem estruturado. Restam ${fix} ajustes.`;
+}
+
+/** Placar por área e geral. 'na' não entra na conta. Serve a qualquer módulo (site, Instagram, anúncios). */
+export function summarize(results, groups = GROUPS, headlineFn = siteHeadline) {
   const tally = (items) => {
     const counted = items.filter((r) => r.status !== 'na');
     const c = { ok: 0, warn: 0, bad: 0, total: counted.length };
@@ -226,14 +233,9 @@ export function summarize(results) {
     const pct = c.total ? counted.reduce((s, r) => s + SCORE[r.status], 0) / c.total : null;
     return { ...c, pct, level: pct == null ? 'na' : levelOf(pct) };
   };
-  const groups = Object.fromEntries(GROUPS.map((g) => [g.id, tally(results.filter((r) => r.group === g.id))]));
+  const byGroup = Object.fromEntries(groups.map((g) => [g.id, tally(results.filter((r) => r.group === g.id))]));
   const overall = tally(results);
-  const fix = overall.bad + overall.warn;
-  overall.fix = fix;
-  overall.headline = overall.level === 'bad'
-    ? `Seu site tem ${fix} pontos a corrigir que podem estar afastando clientes.`
-    : overall.level === 'warn'
-      ? `Seu site está razoável, mas tem ${fix} pontos a corrigir.`
-      : fix === 0 ? 'Seu site está bem estruturado.' : `Seu site está bem estruturado. Restam ${fix} ajustes.`;
-  return { groups, overall };
+  overall.fix = overall.bad + overall.warn;
+  overall.headline = overall.total ? headlineFn(overall) : 'Não foi possível verificar nenhum item.';
+  return { groups: byGroup, overall };
 }
