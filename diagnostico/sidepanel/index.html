@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Diagnóstico Rápido · V4</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">D</span>
+      <div>
+        <h1>Diagnóstico Rápido</h1>
+        <p>V4 Company · Carvalho & Co.</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <button id="fullscreen" class="btn btn-ghost" type="button" title="Abrir em uma aba grande para mostrar ao cliente">Tela grande</button>
+      <button id="rerun" class="btn btn-ghost" type="button" title="Analisar a aba ativa novamente">Reanalisar</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" role="status" hidden></div>
+  <main id="view" aria-live="polite"></main>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>
