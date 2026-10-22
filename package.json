@@ -1,6 +1,6 @@
 {
   "name": "scope-extension",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Extensão Chrome S.C.O.P.E. (V4 Company) — análise prévia de SEO estrutural",

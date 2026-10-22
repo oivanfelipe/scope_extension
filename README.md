@@ -11,6 +11,16 @@ Extensão interna da **V4 Company · Carvalho & Co.** Com um clique, o time vê 
 
 Para atualizar: substitua os arquivos da pasta pela nova versão e clique em **recarregar** (↻) no card da extensão. Requer Chrome 116 ou superior.
 
+## Como usar numa reunião com o dono do site
+
+1. Abra a página do cliente e clique no ícone **S**. A análise roda sozinha.
+2. O topo do **Resumo** traz o **veredito em uma frase**, por exemplo: *"Esta página precisa de ajustes: encontramos 3 problemas importantes que podem estar afastando clientes."* Se a página estiver bem, a frase diz isso.
+3. Logo abaixo, **Principais pontos para ajustar**: cada um com o nome em português simples, **o que isso causa** no negócio e **o que encontramos** na página (o dado que prova o ponto).
+4. **Modo apresentação:** mostra só o veredito e os pontos principais, em letra grande, sem filtros nem notas, para exibir numa tela. Sai com o botão ou a tecla Esc.
+5. **Relatório para o cliente:** em **Exportar**, informe o nome do cliente e o seu nome (opcionais) e clique em **Abrir relatório**. É um arquivo único com a marca V4, a imagem da página, o veredito, os pontos explicados e o que fazer. Para virar PDF, use Ctrl + P (Cmd + P no Mac) e "Salvar como PDF". O nome do cliente fica salvo por site.
+
+Termos técnicos (canonical, schema, H1…) ficam em **Achados → Detalhe técnico**, para quem vai executar o ajuste.
+
 ## Como ler o resultado
 
 O resumo responde, em linguagem simples, **quanto ainda dá para melhorar**:
@@ -50,7 +60,7 @@ A extensão detecta o tipo da página (por schema, URL e sinais da página) e mo
 
 ## Exportar
 
-Aba **Exportar**: copiar o resumo (Markdown), baixar `.md` ou `.csv` (uma linha por item, com nível, tema, oportunidade de melhora, nota, por que importa, o que encontramos e o que fazer).
+Aba **Exportar**: relatório para o cliente (HTML), copiar o resumo em texto, baixar `.md` ou `.csv` (uma linha por item, com nível, tema, oportunidade de melhora, nota, por que importa, o que encontramos e o que fazer).
 
 ## Limites conhecidos
 
@@ -71,7 +81,7 @@ npm test           # robots, notas, checagens com fixtures de produto e serviço
 npm run pack       # gera dist/scope-extension-vX.Y.Z.zip
 ```
 
-Os nomes simples e os textos de *por que importa* ficam em `lib/insights.js` (todo item novo precisa de uma entrada; o teste acusa se faltar).
+Os textos em linguagem simples (nome, por que importa, o que isso causa, o que fazer) ficam em `lib/insights.js`; todo item novo precisa de uma entrada, e o teste acusa se faltar. O relatório para o cliente é montado em `lib/owner-report.js`.
 
 Estrutura: `lib/collector.js` (lê a página renderizada) · `lib/network.js` (robots, sitemap, variações, 404, links) · `lib/checks.js` (checagens, nível, tema e tipos de página) · `lib/scoring.js` (notas, oportunidade e médias) · `lib/report.js` (Markdown/CSV) · `sidepanel/` (interface).
 

@@ -2,8 +2,9 @@ import { collectPage } from '../lib/collector.js';
 import { fetchPage, fetchVariants, fetchRobots, fetchSitemaps, fetchLlmsTxt, fetchSoft404, checkLinks } from '../lib/network.js';
 import { buildContext, runChecks, PAGE_TYPES } from '../lib/checks.js';
 import { GROUPS, LEVELS, OPPS, SCORE_LABELS, byWorst, finalize, summarize } from '../lib/scoring.js';
-import { friendly, why } from '../lib/insights.js';
-import { toMarkdown, toCsv, fileStem, headline } from '../lib/report.js';
+import { friendly, why, impactOf, todoOf } from '../lib/insights.js';
+import { toOwnerHtml } from '../lib/owner-report.js';
+import { toMarkdown, toCsv, fileStem, headline, verdict, mainPoints, proofOf } from '../lib/report.js';
 
 const $ = (sel) => document.querySelector(sel);
 const view = $('#view');
@@ -14,7 +15,8 @@ const rerunBtn = $('#rerun');
 const state = {
   tab: null, page: null, net: null, pageTypeOverride: null, overrides: {},
   results: [], summary: null, tabView: 'resumo', filter: { level: 'all', opp: 'all' },
-  running: false, analyzedUrl: null, toast: '',
+  running: false, analyzedUrl: null, toast: '', presenting: false, screenshot: null,
+  client: '', analyst: localStorage.getItem('scope.analyst') || '',
 };
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -28,6 +30,20 @@ async function getTargetTab() {
   if (forced) return chrome.tabs.get(Number(forced));
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   return tab;
+}
+
+/** Miniatura da página para o relatório (só funciona com a aba visível; se falhar, o relatório sai sem imagem). */
+async function captureScreenshot(tab) {
+  try {
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 70 });
+    const bmp = await createImageBitmap(await (await fetch(dataUrl)).blob());
+    const w = Math.min(900, bmp.width);
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = Math.round(bmp.height * (w / bmp.width));
+    canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.6);
+  } catch { return null; }
 }
 
 const isAnalyzable = (url) => /^https?:\/\//i.test(url || '') && !/^https:\/\/(chrome\.google\.com\/webstore|chromewebstore\.google\.com)/i.test(url);
@@ -81,7 +97,10 @@ async function analyze() {
     }
     if (!page) { renderError('Não consegui ler a página', 'A página não devolveu dados. Recarregue a aba e tente novamente.'); return; }
     done.push('page');
+    state.screenshot = await captureScreenshot(tab);
+    state.presenting = false;
     state.page = page;
+    try { state.client = localStorage.getItem('scope.client.' + page.host) || ''; } catch { state.client = ''; }
     state.analyzedUrl = page.url;
 
     const net = {};
@@ -166,21 +185,40 @@ function oppCard(lvl, title) {
   </div>`;
 }
 
+function verdictBanner() {
+  const v = verdict(state.summary);
+  return `<section class="verdict ${oppClass(v.opp)}" aria-label="Veredito">
+    <span class="v-tag">${esc(OPPS[v.opp]?.label || 'Sem dados')}</span>
+    <h2 class="v-text">${esc(v.text)}</h2>
+    <p class="v-site">${esc(v.siteText)}</p>
+    <div class="v-actions">
+      <button type="button" class="btn btn-red" data-present>Modo apresentação</button>
+      <button type="button" class="btn" data-open-report>Relatório para o cliente</button>
+    </div></section>`;
+}
+
+function pointCard(r, { big = false } = {}) {
+  return `<li class="${oppClass(r.opp)}"><${big ? 'div class="pt-static"' : 'button type="button" data-open="' + r.id + '"'}>
+    <span class="f-top">${levelTag(r.level)} ${oppPill(r.opp)}</span>
+    <span class="f-name">${esc(itemTitle(r))}</span>
+    ${impactOf(r.id) ? `<span class="f-why">${esc(impactOf(r.id))}</span>` : ''}
+    <span class="f-proof"><i>O que encontramos:</i> ${esc(proofOf(r, big ? 170 : 150))}</span>
+    ${big ? '' : '<span class="f-go">Ver o que fazer →</span>'}</${big ? 'div' : 'button'}></li>`;
+}
+
 function renderResumo() {
   const { summary, results, page, ctx } = state;
-  const focus = results.filter((r) => !r.na && r.score <= 3).sort(byWorst).slice(0, 5);
+  const focus = mainPoints(results, 5);
   return `
-    ${oppCard('page', new URL(page.url).pathname + ` · ${PAGE_TYPES[ctx.pageType]}`)}
-    ${oppCard('site', page.host)}
+    ${verdictBanner()}
 
-    <div class="card"><h3>Onde focar primeiro</h3>
-      ${focus.length ? `<ol class="focus">${focus.map((r) => `<li class="${oppClass(r.opp)}"><button type="button" data-open="${r.id}">
-        <span class="f-top">${levelTag(r.level)} ${oppPill(r.opp)}</span>
-        <span class="f-name">${esc(itemTitle(r))}</span>
-        <span class="f-why">${esc(why(r.id))}</span>
-        <span class="f-go">Ver o que fazer →</span></button></li>`).join('')}</ol>`
+    <div class="card"><h3>Principais pontos para ajustar</h3>
+      ${focus.length ? `<ol class="focus">${focus.map((r) => pointCard(r)).join('')}</ol>`
       : '<p style="margin:0;color:var(--muted)">Nenhum ponto com oportunidade média ou grande. Só restam ajustes finos.</p>'}
     </div>
+
+    ${oppCard('page', new URL(page.url).pathname + ` · ${PAGE_TYPES[ctx.pageType]}`)}
+    ${oppCard('site', page.host)}
 
     <div class="card"><h3>Página por tema</h3><div class="dims">
       ${Object.entries(summary.groups).map(([g, s]) => `<div class="dim ${oppClass(s.opp)}">
@@ -192,22 +230,37 @@ function renderResumo() {
     <div class="notice"><b>Como ler.</b> <b>Oportunidade de melhora</b> mostra o quanto ainda dá para ganhar: <b>grande</b> (corrigir logo), <b>média</b>, <b>baixa</b> (ajuste fino) ou <b>sem oportunidade</b> (ok). <b>Site</b> vale para o domínio inteiro; <b>Página</b> vale só para esta URL; itens de produto ou serviço aparecem conforme o tipo da página. Não usa Search Console, Semrush nem PageSpeed; performance é medição local, indicativa.</div>`;
 }
 
+function renderApresentacao() {
+  const v = verdict(state.summary);
+  const pts = mainPoints(state.results, 5);
+  return `<div class="present">
+    <div class="p-bar"><span class="p-host">${esc(state.page.host)}${state.client ? ` · ${esc(state.client)}` : ''}</span><button type="button" class="btn" data-exit-present>Sair do modo apresentação</button></div>
+    <section class="verdict ${oppClass(v.opp)}"><span class="v-tag">${esc(OPPS[v.opp]?.label || 'Sem dados')}</span>
+      <h2 class="v-text">${esc(v.text)}</h2><p class="v-site">${esc(v.siteText)}</p></section>
+    ${pts.length ? `<h3 class="p-title">Principais pontos</h3><ol class="focus big">${pts.map((r) => pointCard(r, { big: true })).join('')}</ol>` : '<p class="p-ok">Nenhum ponto relevante a ajustar.</p>'}
+  </div>`;
+}
+
 function findingHtml(r, open = false) {
   if (r.na) {
     return `<details class="finding na" id="f-${r.id}"><summary><span class="nm">${esc(itemTitle(r))}<small>${esc(r.name)}</small></span><span class="meta">${levelTag(r.level)}<span class="pill o-na">Não verificado</span></span></summary>
       <div class="body"><div class="txt">${esc(r.reason)}</div></div></details>`;
   }
+  const bad = r.score < 5;
   return `<details class="finding ${oppClass(r.opp)}" id="f-${r.id}" ${open ? 'open' : ''}>
-    <summary><span class="nm">${esc(itemTitle(r))}<small>${esc(r.name)}</small></span>
+    <summary><span class="nm">${esc(itemTitle(r))}</span>
       <span class="meta">${levelTag(r.level)}${oppPill(r.opp)}</span></summary>
     <div class="body">
-      ${why(r.id) ? `<div><span class="lab">Por que importa</span><div class="txt">${esc(why(r.id))}</div></div>` : ''}
-      <div><span class="lab">O que encontramos</span><div class="txt">${esc(r.evidence)}</div></div>
-      ${r.score < 5 && r.recommendation ? `<div><span class="lab">O que fazer</span><div class="txt">${esc(r.recommendation)}</div></div>` : '<div class="txt" style="color:var(--s5);font-weight:600">Sem ação necessária.</div>'}
-      <div class="calc"><span>Nota ${r.score} de 5 (${SCORE_LABELS[r.score]})</span>
-        <label>Ajustar nota: <select data-override="${r.id}" aria-label="Ajustar nota de ${esc(itemTitle(r))}">
+      <div><span class="lab">${bad ? 'O que isso causa' : 'Por que importa'}</span><div class="txt">${esc(bad ? (impactOf(r.id) || why(r.id)) : why(r.id))}</div></div>
+      <div><span class="lab">O que encontramos</span><div class="txt proof">${esc(r.evidence)}</div></div>
+      ${bad ? `<div><span class="lab">O que fazer</span><div class="txt">${esc(todoOf(r.id) || r.recommendation)}</div></div>` : '<div class="txt" style="color:var(--s5);font-weight:600">Sem ação necessária.</div>'}
+      <details class="tech"><summary>Detalhe técnico</summary>
+        <div class="txt"><b>${esc(r.name)}</b> · nota ${r.score} de 5 (${SCORE_LABELS[r.score]})</div>
+        ${bad && r.recommendation ? `<div class="txt"><span class="lab">Recomendação técnica (para quem executa)</span>${esc(r.recommendation)}</div>` : ''}
+        <label class="calc">Ajustar nota: <select data-override="${r.id}" aria-label="Ajustar nota de ${esc(itemTitle(r))}">
           <option value="">automática (${r.autoScore})</option>${[1, 2, 3, 4, 5].map((n) => `<option value="${n}" ${r.overridden && r.score === n ? 'selected' : ''}>${n} · ${SCORE_LABELS[n]}</option>`).join('')}
-        </select></label></div>
+        </select></label>
+      </details>
     </div></details>`;
 }
 
@@ -245,19 +298,30 @@ function renderExportar() {
   const md = toMarkdown({ meta: meta(), results: state.results, summary: state.summary });
   state.md = md;
   return `<div class="card export">
-    <h3>Levar para a proposta</h3>
+    <h3>Relatório para o cliente</h3>
+    <p class="hint-txt">Um arquivo único, em linguagem simples, com a marca V4. Para virar PDF, abra e use Ctrl + P.</p>
+    <div class="fields">
+      <label>Nome do cliente <small>(opcional)</small><input type="text" id="client" value="${esc(state.client)}" placeholder="Ex.: Elements" autocomplete="off"></label>
+      <label>Análise por <small>(opcional)</small><input type="text" id="analyst" value="${esc(state.analyst)}" placeholder="Seu nome" autocomplete="off"></label>
+    </div>
     <div class="actions">
-      <button class="btn btn-red" type="button" data-export="copy">Copiar resumo (Markdown)</button>
+      <button class="btn btn-red" type="button" data-export="report-open">Abrir relatório</button>
+      <button class="btn" type="button" data-export="report">Baixar relatório (.html)</button>
+    </div>
+    <h3 style="margin-top:6px">Outros formatos</h3>
+    <div class="actions">
+      <button class="btn" type="button" data-export="copy">Copiar resumo (texto)</button>
       <button class="btn" type="button" data-export="md">Baixar .md</button>
       <button class="btn" type="button" data-export="csv">Baixar .csv (planilha)</button>
     </div>
     <div class="toast" id="toast" role="status">${esc(state.toast)}</div>
-    <textarea readonly aria-label="Pré-visualização do relatório em Markdown">${esc(md)}</textarea>
+    <textarea readonly aria-label="Pré-visualização do resumo em texto">${esc(md)}</textarea>
   </div>`;
 }
 
 function render(openId) {
   if (!state.summary) return;
+  if (state.presenting) { targetEl.hidden = true; view.innerHTML = renderApresentacao(); return; }
   renderTarget();
   const tabs = [['resumo', 'Resumo'], ['achados', 'Achados'], ['exportar', 'Exportar']];
   const body = state.tabView === 'resumo' ? renderResumo() : state.tabView === 'achados' ? renderAchados(openId) : renderExportar();
@@ -268,9 +332,12 @@ function render(openId) {
 // ------------------------------------------------------------------ Eventos
 
 view.addEventListener('click', async (e) => {
-  const t = e.target.closest('[data-tab],[data-open],[data-filter],[data-export]');
+  const t = e.target.closest('[data-tab],[data-open],[data-filter],[data-export],[data-present],[data-exit-present],[data-open-report]');
   if (!t) return;
-  if (t.dataset.tab) { state.tabView = t.dataset.tab; render(); }
+  if (t.dataset.present !== undefined) { state.presenting = true; render(); window.scrollTo(0, 0); }
+  else if (t.dataset.exitPresent !== undefined) { state.presenting = false; render(); }
+  else if (t.dataset.openReport !== undefined) { state.tabView = 'exportar'; render(); }
+  else if (t.dataset.tab) { state.tabView = t.dataset.tab; render(); }
   else if (t.dataset.open) { state.filter = { level: 'all', opp: 'all' }; state.tabView = 'achados'; render(t.dataset.open); document.getElementById('f-' + t.dataset.open)?.setAttribute('open', ''); }
   else if (t.dataset.filter) { state.filter[t.dataset.filter] = t.dataset.value; render(); }
   else if (t.dataset.export) await doExport(t.dataset.export);
@@ -303,18 +370,45 @@ function download(name, text, mime) {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
+async function fontsBase64() {
+  const load = async (f) => {
+    const buf = new Uint8Array(await (await fetch(chrome.runtime.getURL(`assets/fonts/${f}`))).arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+    return btoa(bin);
+  };
+  try { return { oswald: await load('oswald-latin.woff2'), inter: await load('inter-latin.woff2') }; } catch { return null; }
+}
+
+async function buildReportHtml() {
+  const m = { ...meta(), client: state.client.trim() };
+  return toOwnerHtml({ meta: m, results: state.results, summary: state.summary, screenshot: state.screenshot, fonts: await fontsBase64(), client: m.client, analyst: state.analyst.trim() });
+}
+
 async function doExport(kind) {
-  const m = meta();
+  const m = { ...meta(), client: state.client.trim() };
   const stem = fileStem(m);
   const data = { meta: m, results: state.results, summary: state.summary };
   try {
     if (kind === 'copy') { await navigator.clipboard.writeText(toMarkdown(data)); state.toast = 'Resumo copiado.'; }
     else if (kind === 'md') { download(stem + '.md', toMarkdown(data), 'text/markdown;charset=utf-8'); state.toast = 'Arquivo .md baixado.'; }
-    else { download(stem + '.csv', toCsv(data), 'text/csv;charset=utf-8'); state.toast = 'Arquivo .csv baixado.'; }
+    else if (kind === 'csv') { download(stem + '.csv', toCsv(data), 'text/csv;charset=utf-8'); state.toast = 'Arquivo .csv baixado.'; }
+    else if (kind === 'report') { download(stem + '.html', await buildReportHtml(), 'text/html;charset=utf-8'); state.toast = 'Relatório baixado. Abra o arquivo e use Ctrl + P para salvar em PDF.'; }
+    else if (kind === 'report-open') {
+      const url = URL.createObjectURL(new Blob([await buildReportHtml()], { type: 'text/html;charset=utf-8' }));
+      await chrome.tabs.create({ url });
+      state.toast = 'Relatório aberto em uma nova aba.';
+    }
   } catch (e) { state.toast = 'Não foi possível exportar: ' + (e.message || e); }
   const el = document.getElementById('toast');
   if (el) el.textContent = state.toast;
 }
+
+view.addEventListener('input', (e) => {
+  if (e.target.id === 'client') { state.client = e.target.value; try { localStorage.setItem('scope.client.' + state.page.host, state.client); } catch { /* sem storage */ } }
+  if (e.target.id === 'analyst') { state.analyst = e.target.value; try { localStorage.setItem('scope.analyst', state.analyst); } catch { /* sem storage */ } }
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.presenting) { state.presenting = false; render(); } });
 
 // ----------------------------------------------- Aviso de troca de aba/URL
 

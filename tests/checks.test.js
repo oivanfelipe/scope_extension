@@ -6,7 +6,8 @@ import { parseRobots } from '../lib/robots.js';
 import { finalize, summarize } from '../lib/scoring.js';
 import { INSIGHTS } from '../lib/insights.js';
 import { CHECKS } from '../lib/checks.js';
-import { toMarkdown, toCsv, headline } from '../lib/report.js';
+import { toMarkdown, toCsv, headline, verdict } from '../lib/report.js';
+import { toOwnerHtml } from '../lib/owner-report.js';
 
 const BAD_PRODUCT = `<!doctype html><html><head>
 <title>Astra</title>
@@ -231,7 +232,11 @@ test('e-commerce: ?variant= não penaliza URL; terceiros e peso usam régua de l
 });
 
 test('todo item tem nome simples e "por que importa" em linguagem acessível', () => {
-  for (const c of CHECKS) assert.ok(INSIGHTS[c.id] && INSIGHTS[c.id][0] && INSIGHTS[c.id][1].length > 30, `${c.id} sem insight`);
+  for (const c of CHECKS) {
+    const [name, why, impact, todo] = INSIGHTS[c.id] || [];
+    assert.ok(name && why?.length > 30 && impact?.length > 30 && todo?.length > 15, `${c.id} sem insight completo`);
+  }
+  assert.equal(Object.keys(INSIGHTS).length, CHECKS.length, 'insights sobrando ou faltando');
 });
 
 test('resumo e exportações usam oportunidade de melhora e "onde focar primeiro"', async () => {
@@ -243,11 +248,48 @@ test('resumo e exportações usam oportunidade de melhora e "onde focar primeiro
   const meta = { url: ctx.page.url, host: ctx.page.host, path: ctx.page.path, date: '2026-10-21', pageType: ctx.pageType, platforms: [] };
   const md = toMarkdown({ meta, results, summary });
   assert.match(md, /## Resumo/);
-  assert.match(md, /Onde focar primeiro/);
+  assert.match(md, /Principais pontos para ajustar/);
+  assert.match(md, /Esta página precisa de ajustes/);
   assert.match(md, /Grande oportunidade/);
-  assert.match(md, /Por que importa:/);
+  assert.match(md, /O que isso causa:/);
+  assert.match(md, /O que fazer:/);
+  assert.match(md, /Detalhe técnico/);
   assert.doesNotMatch(md, /Sprint|prioridade \d/i);
   const csv = toCsv({ meta, results });
   assert.match(csv, /Oportunidade de melhora/);
+  assert.match(csv, /O que isso causa/);
   assert.match(csv, /Grande oportunidade/);
+});
+
+test('veredito em uma frase para cada nível de oportunidade', () => {
+  const mk = (page, site) => ({ levels: {
+    page: { opp: page, grande: 3, media: 2, baixa: 1, nenhuma: 4 },
+    site: { opp: site, grande: 1, media: 1, baixa: 0, nenhuma: 2 } } });
+  assert.match(verdict(mk('grande', 'media')).text, /precisa de ajustes: encontramos 3 problemas importantes/);
+  assert.match(verdict(mk('media', 'baixa')).text, /funciona, mas tem 5 pontos que podem trazer mais clientes/);
+  assert.match(verdict(mk('baixa', 'nenhuma')).text, /está bem/);
+  assert.match(verdict(mk('nenhuma', 'nenhuma')).text, /ótimo estado/);
+  assert.match(verdict(mk('grande', 'grande')).siteText, /pontos importantes a corrigir/);
+});
+
+test('relatório para o dono: veredito, impacto, prova e o que fazer; escapa HTML; sem jargão de sprint', async () => {
+  const { res, ctx } = await run(BAD_PRODUCT, 'https://www.exemplo.com.br/products/astra', baseNet());
+  const results = res.__all;
+  const summary = summarize(results);
+  const meta = { url: ctx.page.url, host: ctx.page.host, path: ctx.page.path, date: '2026-10-22', pageType: ctx.pageType, platforms: [] };
+  const html = toOwnerHtml({ meta, results, summary, client: 'Loja <b>X</b> & Cia', analyst: 'Ana', screenshot: 'data:image/jpeg;base64,AAAA' });
+  assert.match(html, /<!doctype html>/i);
+  assert.match(html, /Esta página precisa de ajustes/);
+  assert.match(html, /O que isso causa/);
+  assert.match(html, /O que encontramos/);
+  assert.match(html, /O que fazer/);
+  assert.match(html, /Loja &lt;b&gt;X&lt;\/b&gt; &amp; Cia/);
+  assert.doesNotMatch(html, /<b>X<\/b>/);
+  assert.match(html, /22\/10\/2026/);
+  assert.match(html, /data:image\/jpeg;base64,AAAA/);
+  assert.doesNotMatch(html, /sprint|prioridade \d|Q ?× ?I/i);
+  assert.match(html, /marcada para NÃO aparecer no Google/);
+  assert.doesNotMatch(html, /<script/i);
+  const semFoto = toOwnerHtml({ meta, results, summary });
+  assert.doesNotMatch(semFoto, /class="shot"/);
 });
