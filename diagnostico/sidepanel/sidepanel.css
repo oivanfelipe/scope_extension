@@ -126,3 +126,5 @@ details.unk summary { color: var(--muted); }
 .loss li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; }
 .loss li b { display: block; } .loss li span:not(.dot) { color: var(--muted); }
 .speed .ctx { font-weight: 400; font-size: 13px; color: var(--muted); margin-top: 10px; text-align: left; }
+.ai .check { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; margin: 8px 0 10px; color: var(--muted); }
+.ai .check input { margin-top: 2px; }

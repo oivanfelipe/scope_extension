@@ -120,8 +120,18 @@ export async function collectPage() {
     socialProof: proofRe.test(bodyText) || proofEl || /aggregateRating|"review"/i.test(inline),
   };
 
+  // ---------- Conteúdo público (usado só na leitura qualitativa por IA, se o vendedor permitir)
+  const squish = (t, n) => (t || '').replace(/\s+/g, ' ').trim().slice(0, n);
+  const content = {
+    h1: squish(q('h1')?.textContent, 150),
+    headings: qa('h2').slice(0, 8).map((h) => squish(h.textContent, 100)).filter(Boolean),
+    ctas: uniq(qa('a, button, [role=button]').filter((el) => buttonLike(el) && visible(el)).map((el) => squish(el.innerText || el.value, 50)).filter((t) => t && t.length > 2)).slice(0, 8),
+    description: structure.description,
+    body: squish(d.body?.innerText, 3000),
+  };
+
   return {
     url: location.href, origin: location.origin, host: location.hostname.replace(/^www\./, ''),
-    title: d.title || '', speed, structure, tracking, conversion,
+    title: d.title || '', speed, structure, tracking, conversion, content,
   };
 }

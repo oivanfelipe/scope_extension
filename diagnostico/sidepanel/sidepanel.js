@@ -3,8 +3,8 @@ import { fetchRobots, fetchSitemap } from '../lib/network.js';
 import { LEVEL_LABEL, SPEED_LIMITS, fmtSeconds, mainSpeedMs, runChecks, speedLevel, summarize, topLosses } from '../lib/checks.js';
 import { CONTEXTS, detectContext } from '../lib/contexts.js';
 import { analyzeIg, collectInstagram, engagementBenchmark, parsePostHtml, runIgChecks } from '../lib/instagram.js';
-import { analyzeAds, collectAdLibrary, runAdChecks } from '../lib/adlibrary.js';
-import { PROVIDERS, buildMessages, generateSummary, listModels, loadAi, saveAi } from '../lib/ai.js';
+import { adCopies, analyzeAds, collectAdLibrary, runAdChecks } from '../lib/adlibrary.js';
+import { PROVIDERS, buildMessages, generateSummary, listModels, loadAi, resolveAi, saveAi } from '../lib/ai.js';
 import { fileStem, speedSentence, toMarkdown, toShortText } from '../lib/report.js';
 import { addEntry, loadHost, saveClient } from '../lib/storage.js';
 
@@ -69,7 +69,7 @@ async function runSite(tab) {
   const results = runChecks(data, net);
   const ms = mainSpeedMs(data);
   return {
-    data, results, key: data.host,
+    data, results, key: data.host, content: data.content,
     big: ms == null ? { label: 'Tempo de carregamento', value: null, sentence: 'Não foi possível medir. Use "Medir velocidade de novo".', level: 'na' }
       : { label: 'Tempo para o site aparecer', value: `${fmtSeconds(ms)}`, unit: ' segundos', sentence: speedSentence(ms), level: speedLevel(ms), barMs: ms, context: SPEED_CONTEXT[speedLevel(ms)], hint: 'Medido neste computador. Para a medição mais fiel, use "Medir velocidade de novo".' },
     historyText: ms == null ? null : `${fmtSeconds(ms)} s`,
@@ -107,7 +107,8 @@ async function runInstagram(tab) {
       hint: `Calculado com ${a.sampled} posts recentes e ${a.followers.toLocaleString('pt-BR')} seguidores. Referência de mercado aproximada.`,
     };
   }
-  return { data, results, key: data.host, big, historyText: a.engagementPct == null ? null : `${fmtPct(a.engagementPct)}%`, notes: posts.length === 0 ? 'Nenhum post pôde ser lido. Confirme que está logado no Instagram e role o perfil.' : '' };
+  const content = { bio: profile.headerText, posts };
+  return { data, results, key: data.host, content, big, historyText: a.engagementPct == null ? null : `${fmtPct(a.engagementPct)}%`, notes: posts.length === 0 ? 'Nenhum post pôde ser lido. Confirme que está logado no Instagram e role o perfil.' : '' };
 }
 
 async function runAds(tab) {
@@ -117,7 +118,7 @@ async function runAds(tab) {
   const results = runAdChecks(a);
   const data = { url: raw.url, host: raw.key, tracking: {} };
   return {
-    data, results, key: raw.key,
+    data, results, key: raw.key, content: { copies: adCopies(raw) },
     big: a.analyzed === 0
       ? { label: 'Anúncios ativos', value: null, sentence: 'Não conseguimos ler anúncios. Abra a Biblioteca de Anúncios do anunciante, role a página para carregar e reanalise.', level: 'na' }
       : { label: 'Anúncios ativos lidos', value: String(a.active), unit: a.active === 1 ? ' anúncio' : ' anúncios', level: a.active >= 8 ? 'ok' : a.active >= 3 ? 'warn' : 'bad',
@@ -146,7 +147,7 @@ async function analyze() {
     try { out = await RUNNERS[ctxId](tab); } catch (e) { showState(e.title || 'Não consegui ler a página', e.title ? e.message : `${e.message || e}. Se a aba acabou de abrir, aguarde o carregamento e tente de novo.`); return; }
 
     const summary = summarize(out.results, ctx.groups, ctx.headline);
-    state.run = { ctx, key: out.key, data: out.data, results: out.results, summary, big: out.big, notes: out.notes || '' };
+    state.run = { ctx, key: out.key, data: out.data, results: out.results, summary, big: out.big, content: out.content || null, notes: out.notes || '' };
     state.analyzedUrl = tab.url;
     state.ai = { text: '', loading: false, error: '' };
 
@@ -251,17 +252,19 @@ function historyCard() {
 function aiCard(settings) {
   const { ai } = state;
   const provider = settings.provider;
+  const ready = settings.apiKey || settings.hasTeamKey;
   return `<section class="card ai">
-    <h2>Resumo para a conversa (IA)</h2>
-    ${ai.text ? `<div class="ai-text">${esc(ai.text)}</div>` : '<p class="sub">A IA escreve, em linguagem simples, os 3 pontos mais importantes e um próximo passo para a conversa com o cliente.</p>'}
+    <h2>Análise com IA</h2>
+    ${ai.text ? `<div class="ai-text">${esc(ai.text)}</div>` : '<p class="sub">A IA escreve, em linguagem simples, os 3 pontos mais importantes, uma leitura do conteúdo (opinião da IA, separada dos dados medidos) e um próximo passo para a conversa com o cliente.</p>'}
     ${ai.error ? `<p class="ai-error">${esc(ai.error)}</p>` : ''}
-    <div class="tools"><button class="btn btn-red" id="ai-go" type="button" ${ai.loading ? 'disabled' : ''}>${ai.loading ? 'Gerando…' : ai.text ? 'Gerar de novo' : 'Gerar resumo com IA'}</button>${ai.text ? '<button class="btn" id="ai-copy" type="button">Copiar resumo da IA</button>' : ''}</div>
-    <details class="settings" ${settings.apiKey ? '' : 'open'}><summary>Configurar IA</summary>
+    <label class="check"><input id="ai-content" type="checkbox" ${settings.sendContent ? 'checked' : ''}> <span>Enviar também o conteúdo público (textos da página, bio e legendas, ou textos dos anúncios) para a leitura qualitativa</span></label>
+    <div class="tools"><button class="btn btn-red" id="ai-go" type="button" ${ai.loading ? 'disabled' : ''}>${ai.loading ? 'Gerando…' : ai.text ? 'Gerar de novo' : 'Gerar análise com IA'}</button>${ai.text ? '<button class="btn" id="ai-copy" type="button">Copiar análise da IA</button>' : ''}</div>
+    <details class="settings" ${ready ? '' : 'open'}><summary>Configurar IA ${settings.hasTeamKey && !settings.apiKey ? '(chave da equipe ativa)' : ''}</summary>
       <label>Provedor <select id="ai-provider">${Object.entries(PROVIDERS).map(([k, p]) => `<option value="${k}" ${k === provider ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
-      <label>Chave da API <input id="ai-key" type="password" autocomplete="off" value="${esc(settings.apiKey)}" placeholder="cole a sua chave"></label>
+      <label>Chave da API <input id="ai-key" type="password" autocomplete="off" value="${esc(settings.apiKey)}" placeholder="${settings.hasTeamKey ? 'vazio = usa a chave da equipe' : 'cole a sua chave'}"></label>
       <label>Modelo <input id="ai-model" list="ai-models" value="${esc(settings.model)}" placeholder="${esc(PROVIDERS[provider].model)}"><datalist id="ai-models"></datalist></label>
       <div class="tools"><button class="btn" id="ai-save" type="button">Salvar</button><button class="btn" id="ai-models-btn" type="button">Listar modelos</button></div>
-      <p class="hint">A chave fica só neste navegador. Enviamos à IA apenas o resultado do checklist (nomes e achados dos itens), nunca o conteúdo da página.</p>
+      <p class="hint">Sem a opção de conteúdo, a IA recebe apenas o resultado do checklist. Com ela, recebe também os textos públicos da página, da bio, das legendas ou dos anúncios. Nunca recebe dados de login nem de navegação.</p>
     </details>
   </section>`;
 }
@@ -309,7 +312,7 @@ function download(name, text, mime) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-const readAiForm = () => ({ provider: $('#ai-provider').value, apiKey: $('#ai-key').value.trim(), model: $('#ai-model').value.trim() });
+const readAiForm = () => ({ provider: $('#ai-provider').value, apiKey: $('#ai-key').value.trim(), model: $('#ai-model').value.trim(), sendContent: $('#ai-content').checked });
 
 document.addEventListener('click', async (e) => {
   const id = e.target.closest('button')?.id;
@@ -322,7 +325,7 @@ document.addEventListener('click', async (e) => {
   if (id === 'ai-save') { await saveAi(readAiForm()); toast('IA configurada'); }
   if (id === 'ai-models-btn') {
     try {
-      const models = await listModels(readAiForm());
+      const models = await listModels(await resolveAi(readAiForm()));
       $('#ai-models').innerHTML = models.map((m) => `<option value="${esc(m)}">`).join('');
       toast(`${models.length} modelos encontrados: clique no campo Modelo`);
     } catch (err) { toast(String(err.message || err).slice(0, 80)); }
@@ -333,8 +336,9 @@ document.addEventListener('click', async (e) => {
     state.ai = { text: '', loading: true, error: '' };
     await render();
     try {
-      const { ctx, data, results, summary, big } = state.run;
-      state.ai = { text: await generateSummary(form, buildMessages({ ctx, client: state.client.trim(), data, results, summary, bigSentence: big.sentence })), loading: false, error: '' };
+      const { ctx, data, results, summary, big, content } = state.run;
+      const settings = await resolveAi(form);
+      state.ai = { text: await generateSummary(settings, buildMessages({ ctx, client: state.client.trim(), data, results, summary, bigSentence: big.sentence, content: form.sendContent ? content : null })), loading: false, error: '' };
     } catch (err) { state.ai = { text: '', loading: false, error: String(err.message || err) }; }
     await render();
   }

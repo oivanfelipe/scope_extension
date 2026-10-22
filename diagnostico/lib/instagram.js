@@ -57,8 +57,10 @@ export function parsePostHtml(url, html) {
   const likes = desc.match(new RegExp(`${COUNT}\\s*(?:likes?|curtidas?)`, 'i'));
   const comments = desc.match(new RegExp(`${COUNT}\\s*(?:comments?|coment[áa]rios?)`, 'i'));
   if (!likes && !comments) return null;
+  const cap = desc.match(/:\s*["“](.*)["”]\.?\s*$/s);
   return {
     url,
+    caption: cap ? cap[1].slice(0, 300) : '',
     isReel: /\/reels?\//.test(url),
     likes: likes ? parseCount(likes[1]) : null,
     comments: comments ? parseCount(comments[1]) : 0,

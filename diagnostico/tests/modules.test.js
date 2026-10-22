@@ -176,3 +176,47 @@ test('IA: chama a API compatível com OpenAI com chave, modelo e mensagens', asy
     await assert.rejects(generateSummary({ provider: 'groq', apiKey: 'x' }, msgs), /Invalid API Key/);
   } finally { globalThis.fetch = real; }
 });
+
+test('IA: conteúdo público entra no prompt só quando informado e fica separado dos dados medidos', async () => {
+  const { contentBlock, buildMessages, withDefaults, PROVIDERS } = await import('../lib/ai.js');
+  const results = [{ id: 'V1', name: 'O site aparece rápido', status: 'bad', found: '5,2 segundos' }];
+  const summary = summarize(results);
+  const base = { ctx: { id: 'site', title: 'Diagnóstico rápido do site' }, client: '', data: { url: 'https://a.com/' }, results, summary, bigSentence: '' };
+  const without = buildMessages(base)[1].content;
+  assert.doesNotMatch(without, /Conteúdo público observado/);
+  assert.doesNotMatch(without, /Leitura do conteúdo/);
+  const withC = buildMessages({ ...base, content: { h1: 'Sorriso saudável', headings: ['Tratamentos'], ctas: ['Agendar avaliação'], description: 'd', body: 'Texto da página' } })[1].content;
+  assert.match(withC, /não são dados medidos/);
+  assert.match(withC, /Título principal: Sorriso saudável/);
+  assert.match(withC, /Leitura do conteúdo \(opinião da IA\)/);
+  assert.match(withC, /proposta de valor/);
+  assert.match(contentBlock('instagram', { bio: 'Clínica', posts: [{ isReel: true, likes: 10, comments: 2, caption: 'Agende sua avaliação gratuita' }] }), /1\. \[Reels, 10 curtidas, 2 comentários\] Agende sua avaliação gratuita/);
+  // sem texto de verdade, não há o que ler: o bloco fica vazio e a leitura não é pedida
+  assert.equal(contentBlock('instagram', { bio: 'acme 120 posts 12,4 mil seguidores 300 seguindo', posts: [{ caption: 'x' }, { caption: '' }] }), '');
+  assert.match(contentBlock('ads', { copies: ['Agende hoje'] }), /1\. Agende hoje/);
+  assert.equal(contentBlock('ads', { copies: [] }), '');
+  assert.equal(PROVIDERS.groq.model, 'openai/gpt-oss-120b');
+  // chave da equipe só entra quando o usuário não tem chave própria
+  const team = { provider: 'groq', apiKey: 'team', model: '' };
+  assert.equal(withDefaults({ provider: 'xai', apiKey: '', model: 'x' }, team).apiKey, 'team');
+  assert.equal(withDefaults({ provider: 'xai', apiKey: 'own', model: 'x' }, team).apiKey, 'own');
+  assert.equal(withDefaults({ provider: 'xai', apiKey: '', model: 'x' }, {}).apiKey, '');
+});
+
+test('Instagram: legenda do post e textos dos anúncios para a leitura por IA', async () => {
+  const p = parsePostHtml('https://www.instagram.com/p/A/', '<meta property="og:description" content="10 likes, 2 comments - acme on October 20, 2025: &quot;Agende sua avaliação gratuita&quot;.">');
+  assert.equal(p.caption, 'Agende sua avaliação gratuita');
+  const { adCopies } = await import('../lib/adlibrary.js');
+  const raw = { cards: [
+    { text: 'Active\nLibrary ID: 1\nStarted running on 1 Oct 2025\nAgende hoje a sua consulta com desconto para novos clientes', hrefs: [] },
+    { text: 'Active\nLibrary ID: 2\nAgende hoje a sua consulta com desconto para novos clientes', hrefs: [] },
+    { text: 'Inactive\nLibrary ID: 3\nTexto de anúncio inativo que não deve entrar na lista', hrefs: [] },
+  ] };
+  assert.deepEqual(adCopies(raw), ['Agende hoje a sua consulta com desconto para novos clientes']);
+});
+
+test('IA: texto devolvido sai sem markdown nem raciocínio', async () => {
+  const { cleanAiText } = await import('../lib/ai.js');
+  assert.equal(cleanAiText('<think>x</think>## Título\n**Negrito** e __outro__  \n- item'), 'Título\nNegrito e outro\n- item');
+  assert.equal(cleanAiText(null), '');
+});

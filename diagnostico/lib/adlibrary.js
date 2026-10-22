@@ -100,6 +100,19 @@ export function parseAdCard(card) {
   };
 }
 
+/** Texto principal de cada anúncio ativo (sem repetições), para a leitura qualitativa por IA. */
+export function adCopies(raw, max = 10) {
+  const out = [];
+  for (const c of raw.cards || []) {
+    const a = parseAdCard(c);
+    if (a.inactive) continue;
+    const best = (c.text || '').split('\n').map((l) => l.trim()).filter((l) => l.length > 25 && !UI_LINES.test(l)).sort((x, y) => y.length - x.length)[0];
+    if (best && !out.includes(best)) out.push(best.slice(0, 300));
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
 export function analyzeAds(raw, now = Date.now()) {
   const ads = (raw.cards || []).map(parseAdCard);
   const active = ads.filter((a) => a.active);

@@ -47,19 +47,26 @@ Abra o perfil (`instagram.com/nome`) ou a Biblioteca de Anúncios da Meta do anu
 - **Anúncios:** lê só os anúncios já carregados na tela; role a página antes de analisar. A Biblioteca não mostra gasto nem resultado, então a análise é de presença, criativos e estratégia.
 - Os dois dependem da estrutura das páginas, que o Instagram e a Meta podem mudar sem aviso, por isso aparecem como **módulo em teste**. Se um item vier "não verificado" ou errado, avise com a URL analisada para ajustar a leitura.
 
-## Resumo com IA (opcional)
+## Análise com IA
 
-Em **Configurar IA**, escolha **Groq** ou **xAI (Grok)**, cole a chave da API e salve (o botão **Listar modelos** mostra os disponíveis; o padrão pode precisar de ajuste se o provedor aposentar o modelo). O botão **Gerar resumo com IA** escreve, em linguagem simples, os 3 pontos mais importantes, o que o cliente já faz bem e um próximo passo para a conversa; o texto entra no `.md`.
+O botão **Gerar análise com IA** escreve, em linguagem simples: o diagnóstico em uma frase, os 3 pontos mais importantes (dos dados medidos), uma **leitura do conteúdo marcada como opinião da IA**, o que o cliente já faz bem e um próximo passo. O texto entra no `.md`.
 
-- A chave fica em `chrome.storage.local` (sem criptografia): use uma chave por pessoa.
-- Só o resultado do checklist (nomes e achados dos itens) é enviado ao provedor; nunca o conteúdo da página.
+- **Leitura do conteúdo** (opção marcada por padrão, que o vendedor pode desligar): a IA recebe também os textos públicos observados. No site, o título, os subtítulos, os botões e o início do texto. No Instagram, a bio e as legendas dos posts recentes. Nos anúncios, o texto dos anúncios ativos. Se não houver texto de verdade para ler (por exemplo, legendas vazias), a leitura não é pedida. Sem a opção, a IA recebe só o resultado do checklist. Nunca recebe dados de login nem de navegação, e a IA não vê imagens nem vídeos.
+- **Provedor:** Groq (padrão, modelo `openai/gpt-oss-120b`) ou xAI (Grok), por API compatível com OpenAI. Em **Configurar IA** dá para usar a chave própria, e **Listar modelos** mostra os disponíveis (os provedores aposentam modelos; o padrão foi conferido na lista do Groq).
+- **Chave da equipe:** o pacote distribuído pode levar a chave num arquivo `lib/config.local.js`, que **não vai para o GitHub** (está no `.gitignore`). Sem chave própria, a extensão usa essa. Formato do arquivo:
+
+```js
+export const DEFAULT_AI = { provider: 'groq', apiKey: '<chave>', model: '' };
+```
+
+  A chave fica legível para quem tiver a pasta da extensão: não circule o `.zip` fora do time e troque a chave se ele vazar. Chaves digitadas em "Configurar IA" ficam em `chrome.storage.local`, sem criptografia.
 
 ## Limites conhecidos
 
 - A velocidade é medida no navegador de quem analisa; é indicativo, não laudo.
 - Rastreamento é **detecção na página aberta**: tags que só carregam após consentimento de cookies, ou dentro do GTM sem aparecer na rede, podem não ser vistas (nesses casos o item vira "Atenção", não "Ruim").
 - Os itens de conversão são heurísticas sobre o que aparece na página (texto e elementos); confira na tela antes de afirmar ao cliente.
-- No site, analisa só a página aberta e o domínio (robots.txt e sitemap). Nada sai do navegador, exceto o resumo opcional enviado à IA.
+- No site, analisa só a página aberta e o domínio (robots.txt e sitemap). Nada sai do navegador, exceto o que é enviado à IA quando o vendedor pede a análise.
 - `chrome://`, Chrome Web Store e abas novas não podem ser analisados.
 
 ## Desenvolvimento
