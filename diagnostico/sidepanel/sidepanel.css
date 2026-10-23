@@ -128,3 +128,6 @@ details.unk summary { color: var(--muted); }
 .speed .ctx { font-weight: 400; font-size: 13px; color: var(--muted); margin-top: 10px; text-align: left; }
 .ai .check { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; margin: 8px 0 10px; color: var(--muted); }
 .ai .check input { margin-top: 2px; }
+.typesel { display: grid; gap: 4px; font-size: 12px; font-weight: 600; margin-top: 4px; }
+.typesel select { border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font: inherit; font-weight: 400; background: #fff; }
+.typesel small { font-weight: 400; color: var(--muted); }

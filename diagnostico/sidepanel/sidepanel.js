@@ -1,8 +1,10 @@
 import { collectPage } from '../lib/collector.js';
 import { fetchRobots, fetchSitemap } from '../lib/network.js';
-import { LEVEL_LABEL, SPEED_LIMITS, fmtSeconds, mainSpeedMs, runChecks, speedLevel, summarize, topLosses } from '../lib/checks.js';
+import { LEVEL_LABEL, SITE_TYPES, SPEED_LIMITS, detectSiteType, fmtSeconds, mainSpeedMs, runChecks, speedLevel, speedSource, summarize, topLosses } from '../lib/checks.js';
+import { fetchPageSpeed } from '../lib/pagespeed.js';
+import { teamConfig } from '../lib/team.js';
 import { CONTEXTS, detectContext } from '../lib/contexts.js';
-import { analyzeIg, collectInstagram, engagementBenchmark, parsePostHtml, runIgChecks } from '../lib/instagram.js';
+import { analyzeIg, bioLinkState, collectInstagram, engagementBenchmark, parsePostHtml, parseProfileApi, runIgChecks } from '../lib/instagram.js';
 import { adCopies, analyzeAds, collectAdLibrary, runAdChecks } from '../lib/adlibrary.js';
 import { PROVIDERS, buildMessages, generateSummary, listModels, loadAi, resolveAi, saveAi } from '../lib/ai.js';
 import { fileStem, speedSentence, toMarkdown, toShortText } from '../lib/report.js';
@@ -60,19 +62,34 @@ const ENGAGEMENT_CONTEXT = {
   ok: 'Na prática: a audiência reage bem ao conteúdo, o que ajuda cada post a chegar a mais gente.',
 };
 
+/** Destaque do site: o tempo do Google PageSpeed (celular) quando disponível; senão a medição local, com aviso. */
+function siteBig(data) {
+  const ms = mainSpeedMs(data);
+  if (ms == null) return { label: 'Tempo de carregamento', value: null, sentence: 'Não foi possível medir. Use "Medir velocidade de novo".', level: 'na' };
+  const src = speedSource(data);
+  const local = data.speed.lcpMs ?? data.speed.loadMs;
+  const level = speedLevel(ms);
+  const hint = src === 'psi'
+    ? `Fonte: Google PageSpeed Insights (celular, rede 4G simulada)${local != null ? `. Neste computador: ${fmtSeconds(local)} s` : ''}.`
+    : `Medido neste computador, em geral mais rápido que o PageSpeed do Google (que simula celular em rede 4G).${data.psi?.reason ? ` PageSpeed indisponível: ${data.psi.reason}.` : ''}`;
+  return { label: src === 'psi' ? 'Tempo para o site aparecer no celular' : 'Tempo para o site aparecer', value: fmtSeconds(ms), unit: ' segundos', sentence: speedSentence(ms), level, barMs: ms, context: SPEED_CONTEXT[level], hint };
+}
+
 async function runSite(tab) {
-  showState('Analisando o site…', 'Leva alguns segundos. Mantenha a aba aberta.');
+  showState('Analisando o site…', 'Leva de 15 a 40 segundos, pois consultamos o Google PageSpeed. Mantenha a aba aberta.');
+  const saved = await loadAi();
+  const psiKey = saved.psiKey || (await teamConfig()).psiKey;
+  const psiPromise = fetchPageSpeed(tab.url, psiKey);
   const data = await runIn(tab, collectPage);
   if (!data) throw new Error('A página não devolveu dados. Recarregue a aba e tente de novo.');
   const net = { robots: await fetchRobots(data.origin) };
   net.sitemap = await fetchSitemap(data.origin, net.robots.sitemaps);
-  const results = runChecks(data, net);
-  const ms = mainSpeedMs(data);
+  data.psi = await psiPromise;
+  const siteType = detectSiteType(data);
+  const big = siteBig(data);
   return {
-    data, results, key: data.host, content: data.content,
-    big: ms == null ? { label: 'Tempo de carregamento', value: null, sentence: 'Não foi possível medir. Use "Medir velocidade de novo".', level: 'na' }
-      : { label: 'Tempo para o site aparecer', value: `${fmtSeconds(ms)}`, unit: ' segundos', sentence: speedSentence(ms), level: speedLevel(ms), barMs: ms, context: SPEED_CONTEXT[speedLevel(ms)], hint: 'Medido neste computador. Para a medição mais fiel, use "Medir velocidade de novo".' },
-    historyText: ms == null ? null : `${fmtSeconds(ms)} s`,
+    data, net, siteType, detectedType: siteType, results: runChecks(data, net, siteType), key: data.host, content: data.content, big,
+    historyText: big.value == null ? null : `${big.value} s`,
   };
 }
 
@@ -80,18 +97,34 @@ async function runInstagram(tab) {
   showState('Lendo o perfil do Instagram…', 'Leva cerca de 10 a 20 segundos. Mantenha a aba aberta.');
   const profile = await runIn(tab, collectInstagram);
   if (!profile?.isProfile) { const e = new Error('Abra o perfil que quer analisar (instagram.com/nome-do-perfil) e clique em Reanalisar.'); e.title = 'Abra um perfil do Instagram'; throw e; }
-  if (profile.isPrivate) { const e = new Error('Este perfil é privado: não dá para ler os posts.'); e.title = 'Perfil privado'; throw e; }
-  const links = profile.postLinks.slice(0, 12);
-  const posts = [];
-  for (let i = 0; i < links.length; i++) {
-    showState('Lendo o perfil do Instagram…', `Lendo post ${i + 1} de ${links.length}. Mantenha a aba aberta.`);
-    try {
-      const html = await runIn(tab, async (u) => (await (await fetch(u, { credentials: 'include' })).text()).slice(0, 150000), [links[i]]);
-      const p = html && parsePostHtml(links[i], html);
-      if (p) posts.push(p);
-    } catch { /* post ignorado */ }
-    await sleep(600);
+  // Fonte principal: API interna do perfil (dados exatos). Reserva: leitura da página e de cada post.
+  let api = null;
+  try {
+    const res = await runIn(tab, async (h) => {
+      const r = await fetch(`/api/v1/users/web_profile_info/?username=${encodeURIComponent(h)}`, { credentials: 'include', headers: { 'x-ig-app-id': '936619743392459' } });
+      return { status: r.status, text: (await r.text()).slice(0, 3000000) };
+    }, [profile.handle]);
+    if (res?.status === 200) api = parseProfileApi(JSON.parse(res.text));
+  } catch { /* usa a reserva */ }
+  if (profile.isPrivate || api?.isPrivate) { const e = new Error('Este perfil é privado: não dá para ler os posts.'); e.title = 'Perfil privado'; throw e; }
+  let posts = api?.posts || [];
+  if (posts.length === 0) {
+    const links = profile.postLinks.slice(0, 12);
+    for (let i = 0; i < links.length; i++) {
+      showState('Lendo o perfil do Instagram…', `Lendo post ${i + 1} de ${links.length}. Mantenha a aba aberta.`);
+      try {
+        const html = await runIn(tab, async (u) => (await (await fetch(u, { credentials: 'include' })).text()).slice(0, 150000), [links[i]]);
+        const p = html && parsePostHtml(links[i], html);
+        if (p) posts.push(p);
+      } catch { /* post ignorado */ }
+      await sleep(600);
+    }
   }
+  const linkState = bioLinkState({ api, domLink: profile.bioLink, bioText: profile.headerText });
+  profile.followers = api?.followers ?? null;
+  profile.postsCount = api?.postsCount ?? null;
+  profile.bioLinkState = linkState;
+  profile.bioLinkUrl = api?.links?.[0] || '';
   const a = analyzeIg(profile, posts);
   const results = runIgChecks(a);
   const data = { ...profile, url: profile.url, host: `instagram.com/${profile.handle}` };
@@ -107,8 +140,9 @@ async function runInstagram(tab) {
       hint: `Calculado com ${a.sampled} posts recentes e ${a.followers.toLocaleString('pt-BR')} seguidores. Referência de mercado aproximada.`,
     };
   }
-  const content = { bio: profile.headerText, posts };
-  return { data, results, key: data.host, content, big, historyText: a.engagementPct == null ? null : `${fmtPct(a.engagementPct)}%`, notes: posts.length === 0 ? 'Nenhum post pôde ser lido. Confirme que está logado no Instagram e role o perfil.' : '' };
+  const content = { bio: api?.bio ?? profile.headerText, links: api?.links || [], posts };
+  const notes = posts.length === 0 ? 'Nenhum post pôde ser lido. Confirme que está logado no Instagram e role o perfil.' : !api ? 'Dados lidos da página (a API do Instagram não respondeu); alguns itens podem ficar sem verificar.' : '';
+  return { data, results, key: data.host, content, big, historyText: a.engagementPct == null ? null : `${fmtPct(a.engagementPct)}%`, notes };
 }
 
 async function runAds(tab) {
@@ -147,7 +181,7 @@ async function analyze() {
     try { out = await RUNNERS[ctxId](tab); } catch (e) { showState(e.title || 'Não consegui ler a página', e.title ? e.message : `${e.message || e}. Se a aba acabou de abrir, aguarde o carregamento e tente de novo.`); return; }
 
     const summary = summarize(out.results, ctx.groups, ctx.headline);
-    state.run = { ctx, key: out.key, data: out.data, results: out.results, summary, big: out.big, content: out.content || null, notes: out.notes || '' };
+    state.run = { ctx, key: out.key, data: out.data, results: out.results, summary, big: out.big, content: out.content || null, notes: out.notes || '', net: out.net, siteType: out.siteType, detectedType: out.detectedType };
     state.analyzedUrl = tab.url;
     state.ai = { text: '', loading: false, error: '' };
 
@@ -157,7 +191,8 @@ async function analyze() {
     const o = summary.overall;
     const after = await addEntry(out.key, { ts: Date.now(), url: out.data.url, ok: o.ok, total: o.total, bigText: out.historyText, items: Object.fromEntries(out.results.map((r) => [r.id, r.status])) });
     state.history = after.entries;
-    render();
+    await render();
+    autoAi();
   } catch (e) {
     showState('Algo deu errado', String(e.message || e));
   } finally {
@@ -202,7 +237,7 @@ function heroCard() {
   return `<section class="card hero ${o.level}">
     <div class="big">${o.ok}<small> de ${o.total} itens estão bons</small></div>
     <p>${esc(o.headline)}</p>
-    <div class="counts"><span>✕ ${o.bad} ruins</span><span>! ${o.warn} em atenção</span><span>✓ ${o.ok} bons</span></div>
+    <div class="counts"><span>✕ ${o.bad} ${o.bad === 1 ? 'ruim' : 'ruins'}</span><span>! ${o.warn} em atenção</span><span>✓ ${o.ok} ${o.ok === 1 ? 'bom' : 'bons'}</span></div>
   </section>`;
 }
 
@@ -236,6 +271,24 @@ function lossCard() {
     <ol>${losses.map((r, i) => `<li><span class="dot ${r.status}" aria-hidden="true">${i + 1}</span><div><b>${esc(r.problem)}</b><span>${esc(r.cost)}</span></div></li>`).join('')}</ol></section>`;
 }
 
+function typeSelect() {
+  const { siteType, detectedType } = state.run;
+  return `<label class="typesel">Tipo de site
+    <select id="site-type">${Object.entries(SITE_TYPES).map(([k, v]) => `<option value="${k}" ${k === siteType ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>
+    <small>${siteType === detectedType ? 'Identificado automaticamente. Os itens se ajustam ao tipo.' : 'Ajustado por você. Os itens se ajustam ao tipo.'}</small></label>`;
+}
+
+/** Refaz os itens para outro tipo de site, sem nova coleta. */
+async function changeSiteType(type) {
+  const run = state.run;
+  run.siteType = type;
+  run.results = runChecks(run.data, run.net, type);
+  run.summary = summarize(run.results, run.ctx.groups, run.ctx.headline);
+  state.ai = { text: '', loading: false, error: '' };
+  await render();
+  autoAi();
+}
+
 function historyCard() {
   const o = state.run.summary.overall;
   let delta = '';
@@ -257,12 +310,14 @@ function aiCard(settings) {
     <h2>Análise com IA</h2>
     ${ai.text ? `<div class="ai-text">${esc(ai.text)}</div>` : '<p class="sub">A IA escreve, em linguagem simples, os 3 pontos mais importantes, uma leitura do conteúdo (opinião da IA, separada dos dados medidos) e um próximo passo para a conversa com o cliente.</p>'}
     ${ai.error ? `<p class="ai-error">${esc(ai.error)}</p>` : ''}
+    <label class="check"><input id="ai-auto" type="checkbox" ${settings.autoAi ? 'checked' : ''}> <span>Gerar a análise com IA automaticamente ao analisar</span></label>
     <label class="check"><input id="ai-content" type="checkbox" ${settings.sendContent ? 'checked' : ''}> <span>Enviar também o conteúdo público (textos da página, bio e legendas, ou textos dos anúncios) para a leitura qualitativa</span></label>
     <div class="tools"><button class="btn btn-red" id="ai-go" type="button" ${ai.loading ? 'disabled' : ''}>${ai.loading ? 'Gerando…' : ai.text ? 'Gerar de novo' : 'Gerar análise com IA'}</button>${ai.text ? '<button class="btn" id="ai-copy" type="button">Copiar análise da IA</button>' : ''}</div>
-    <details class="settings" ${ready ? '' : 'open'}><summary>Configurar IA ${settings.hasTeamKey && !settings.apiKey ? '(chave da equipe ativa)' : ''}</summary>
+    <details class="settings" ${ready ? '' : 'open'}><summary>Configurações ${settings.hasTeamKey && !settings.apiKey ? '(chave de IA da equipe ativa)' : ''}</summary>
       <label>Provedor <select id="ai-provider">${Object.entries(PROVIDERS).map(([k, p]) => `<option value="${k}" ${k === provider ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
       <label>Chave da API <input id="ai-key" type="password" autocomplete="off" value="${esc(settings.apiKey)}" placeholder="${settings.hasTeamKey ? 'vazio = usa a chave da equipe' : 'cole a sua chave'}"></label>
       <label>Modelo <input id="ai-model" list="ai-models" value="${esc(settings.model)}" placeholder="${esc(PROVIDERS[provider].model)}"><datalist id="ai-models"></datalist></label>
+      <label>Chave do Google PageSpeed (opcional, gratuita) <input id="psi-key" type="password" autocomplete="off" value="${esc(settings.psiKey)}" placeholder="${settings.hasTeamPsi ? 'vazio = usa a chave da equipe' : 'sem chave, o Google costuma recusar'}"></label>
       <div class="tools"><button class="btn" id="ai-save" type="button">Salvar</button><button class="btn" id="ai-models-btn" type="button">Listar modelos</button></div>
       <p class="hint">Sem a opção de conteúdo, a IA recebe apenas o resultado do checklist. Com ela, recebe também os textos públicos da página, da bio, das legendas ou dos anúncios. Nunca recebe dados de login nem de navegação.</p>
     </details>
@@ -280,6 +335,7 @@ async function render() {
     <section class="card site">
       <input id="client" type="text" placeholder="Nome do cliente (opcional)" value="${esc(state.client)}" aria-label="Nome do cliente">
       <div class="url">${esc(data.url)}</div>
+      ${isSite ? typeSelect() : ''}
       ${notes ? `<div class="url">${esc(notes)}</div>` : ''}
     </section>
     ${heroCard()}
@@ -299,8 +355,8 @@ async function render() {
 // ------------------------------------------------------------------ Ações
 
 function reportInput() {
-  const { ctx, data, results, summary, big } = state.run;
-  return { client: state.client.trim(), data, results, summary, date: today(), ctx, bigSentence: big.sentence, bigContext: big.context, ai: state.ai.text };
+  const { ctx, data, results, summary, big, siteType } = state.run;
+  return { client: state.client.trim(), data, results, summary, date: today(), ctx, bigSentence: big.sentence, bigContext: big.context, ai: state.ai.text, siteTypeLabel: ctx.id === 'site' ? SITE_TYPES[siteType] : undefined };
 }
 
 function download(name, text, mime) {
@@ -312,7 +368,7 @@ function download(name, text, mime) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-const readAiForm = () => ({ provider: $('#ai-provider').value, apiKey: $('#ai-key').value.trim(), model: $('#ai-model').value.trim(), sendContent: $('#ai-content').checked });
+const readAiForm = () => ({ provider: $('#ai-provider').value, apiKey: $('#ai-key').value.trim(), model: $('#ai-model').value.trim(), sendContent: $('#ai-content').checked, autoAi: $('#ai-auto').checked, psiKey: $('#psi-key').value.trim() });
 
 document.addEventListener('click', async (e) => {
   const id = e.target.closest('button')?.id;
@@ -333,19 +389,40 @@ document.addEventListener('click', async (e) => {
   if (id === 'ai-go') {
     const form = $('#ai-key') ? readAiForm() : await loadAi();
     await saveAi(form);
-    state.ai = { text: '', loading: true, error: '' };
-    await render();
-    try {
-      const { ctx, data, results, summary, big, content } = state.run;
-      const settings = await resolveAi(form);
-      state.ai = { text: await generateSummary(settings, buildMessages({ ctx, client: state.client.trim(), data, results, summary, bigSentence: big.sentence, content: form.sendContent ? content : null })), loading: false, error: '' };
-    } catch (err) { state.ai = { text: '', loading: false, error: String(err.message || err) }; }
-    await render();
+    await runAi(form);
   }
 });
 
+function aiExtra(run) {
+  if (run.ctx.id !== 'site') return '';
+  const src = speedSource(run.data) === 'psi' ? 'Google PageSpeed, celular' : 'medida local, neste computador';
+  return `Tipo de site: ${SITE_TYPES[run.siteType]}. Fonte da velocidade: ${src}.`;
+}
+
+async function runAi(form) {
+  const run = state.run;
+  state.ai = { text: '', loading: true, error: '' };
+  await render();
+  try {
+    const { ctx, data, results, summary, big, content } = run;
+    const settings = await resolveAi(form);
+    const text = await generateSummary(settings, buildMessages({ ctx, client: state.client.trim(), data, results, summary, bigSentence: big.sentence, content: form.sendContent ? content : null, extra: aiExtra(run) }));
+    if (state.run === run) state.ai = { text, loading: false, error: '' };
+  } catch (err) {
+    if (state.run === run) state.ai = { text: '', loading: false, error: String(err.message || err) };
+  }
+  if (state.run === run) await render();
+}
+
+/** A primeira análise já traz a leitura da IA, se houver chave (da equipe ou própria) e a opção estiver ligada. */
+async function autoAi() {
+  const settings = await loadAi();
+  if (settings.autoAi && (settings.apiKey || settings.hasTeamKey)) await runAi(settings);
+}
+
 document.addEventListener('change', (e) => {
   if (e.target.id === 'client' && state.run) { state.client = e.target.value; saveClient(state.run.key, state.client); }
+  if (e.target.id === 'site-type' && state.run) changeSiteType(e.target.value);
   if (e.target.id === 'ai-provider') { const m = $('#ai-model'); m.value = ''; m.placeholder = PROVIDERS[e.target.value].model; }
 });
 

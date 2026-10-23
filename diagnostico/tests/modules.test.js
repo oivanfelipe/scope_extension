@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCount, parsePostHtml, parseProfileText, analyzeIg, runIgChecks, engagementBenchmark, igHeadline, IG_GROUPS } from '../lib/instagram.js';
+import { parseCount, parsePostHtml, parseProfileText, parseProfileApi, bioLinkState, analyzeIg, runIgChecks, engagementBenchmark, igHeadline, IG_GROUPS } from '../lib/instagram.js';
+import { readFileSync } from 'node:fs';
 import { parseAdCard, analyzeAds, runAdChecks, adsHeadline, AD_GROUPS, isAdLibraryUrl } from '../lib/adlibrary.js';
 import { summarize } from '../lib/checks.js';
 import { detectContext } from '../lib/contexts.js';
@@ -68,7 +69,7 @@ test('Instagram: perfil parado e sem engajamento vira ruim; curtidas ocultas sã
   assert.equal(by(r, 'I1').status, 'bad');
   assert.equal(by(r, 'I4').status, 'bad');
   assert.equal(by(r, 'I5').status, 'bad');
-  assert.equal(by(r, 'I6').status, 'bad');
+  assert.equal(by(r, 'I6').status, 'na'); // sem confirmação da API, ausência de link não é prova
   assert.match(by(r, 'I1').found, /curtidas ocultas/);
   assert.deepEqual(engagementBenchmark(1000), [3, 1.5]);
 });
@@ -219,4 +220,54 @@ test('IA: texto devolvido sai sem markdown nem raciocínio', async () => {
   const { cleanAiText } = await import('../lib/ai.js');
   assert.equal(cleanAiText('<think>x</think>## Título\n**Negrito** e __outro__  \n- item'), 'Título\nNegrito e outro\n- item');
   assert.equal(cleanAiText(null), '');
+});
+
+const igFixture = () => JSON.parse(readFileSync(new URL('./fixtures/ig-profile.json', import.meta.url), 'utf8'));
+
+test('Instagram: lê a resposta real da API interna (seguidores, bio, link na bio e posts)', () => {
+  const api = parseProfileApi(igFixture());
+  assert.equal(api.handle, 'instagram');
+  assert.equal(api.followers, 686460244);
+  assert.equal(api.isPrivate, false);
+  assert.ok(api.links.some((u) => /help\.instagram\.com/.test(u)));
+  assert.equal(api.posts.length, 12);
+  const p = api.posts[0];
+  assert.match(p.url, /^https:\/\/www\.instagram\.com\/reel\/[\w-]+\/$/);
+  assert.equal(p.isReel, true);
+  assert.ok(p.likes > 0 && p.comments > 0 && p.ts > 1e12 && p.caption.length > 0);
+  assert.equal(parseProfileApi({}), null);
+  assert.equal(parseProfileApi({ data: { user: null } }), null);
+});
+
+test('Instagram: curtidas ocultas e posts fixados na API', () => {
+  const j = igFixture();
+  const edges = j.data.user.edge_owner_to_timeline_media.edges;
+  edges[0].node.pinned_for_users = [{ username: 'x' }];
+  edges[1].node.like_and_view_counts_disabled = true;
+  const api = parseProfileApi(j);
+  assert.equal(api.posts.length, 11); // o fixado sai
+  assert.equal(api.posts[0].likes, null); // curtidas ocultas viram "não informado", não zero
+  j.data.user.hide_like_and_view_counts = true;
+  assert.ok(parseProfileApi(j).posts.every((x) => x.likes === null));
+});
+
+test('link na bio: só diz que não tem quando a API respondeu e nada indica link', () => {
+  const api = parseProfileApi(igFixture());
+  assert.equal(bioLinkState({ api, domLink: false }), 'yes');
+  const noLink = { ...api, links: [], bio: 'Clínica odontológica' };
+  assert.equal(bioLinkState({ api: noLink, domLink: false }), 'no');
+  assert.equal(bioLinkState({ api: noLink, domLink: true }), 'yes'); // a página mostra um link
+  assert.equal(bioLinkState({ api: { ...noLink, bio: 'Agende: wa.me/5511999' }, domLink: false }), 'yes'); // link no texto da bio
+  assert.equal(bioLinkState({ api: null, domLink: false, bioText: '' }), 'unknown'); // sem API, ausência não é prova
+  assert.equal(bioLinkState({ api: null, domLink: true }), 'yes');
+});
+
+test('Instagram: link na bio em três estados nos itens e a análise usa seguidores da API', () => {
+  const api = parseProfileApi(igFixture());
+  const a = analyzeIg({ followers: api.followers, postsCount: api.postsCount, bioLinkState: 'yes', bioLinkUrl: api.links[0] }, api.posts, Date.now());
+  assert.equal(a.followers, 686460244);
+  assert.equal(a.sampled, 12);
+  assert.match(by(runIgChecks(a), 'I6').found, /tem link na bio \(http/);
+  assert.equal(by(runIgChecks({ ...a, bioLink: 'no' }), 'I6').status, 'bad');
+  assert.equal(by(runIgChecks({ ...a, bioLink: 'unknown' }), 'I6').status, 'na');
 });

@@ -1,0 +1,367 @@
+{
+ "data": {
+  "user": {
+   "biography": "Discover what's new on Instagram 🔎✨",
+   "external_url": "http://help.instagram.com/",
+   "bio_links": [
+    {
+     "title": "",
+     "url": "http://help.instagram.com",
+     "link_type": "external"
+    },
+    {
+     "title": "Close Friends Only with @kaicenat and @kaiyacenat | Spotify",
+     "url": "https://open.spotify.com/episode/6B8XsGCYuHMYzSLvLMitS7?si=kXd6_Y6AQhueoC_McepSKg",
+     "link_type": "external"
+    },
+    {
+     "title": "Close Friends Only with @kaicenat and @kaiyacenat | YouTube",
+     "url": "https://www.youtube.com/watch?v=z0X36mIbyCo",
+     "link_type": "external"
+    }
+   ],
+   "full_name": "Instagram",
+   "is_private": false,
+   "is_verified": true,
+   "is_business_account": false,
+   "category_name": null,
+   "edge_followed_by": {
+    "count": 686460244
+   },
+   "edge_follow": {
+    "count": 158
+   },
+   "username": "instagram",
+   "hide_like_and_view_counts": false,
+   "edge_owner_to_timeline_media": {
+    "count": 8624,
+    "edges": [
+     {
+      "node": {
+       "shortcode": "De2bNIWSZdB",
+       "is_video": true,
+       "product_type": "clips",
+       "__typename": "GraphVideo",
+       "taken_at_timestamp": 1792787702,
+       "edge_liked_by": {
+        "count": 99023
+       },
+       "edge_media_to_comment": {
+        "count": 2366
+       },
+       "like_and_view_counts_disabled": false,
+       "pinned_for_users": [],
+       "comments_disabled": false,
+       "edge_media_to_caption": {
+        "edges": [
+         {
+          "node": {
+           "text": "this paper art? peak cozy vibes 🍂📚⁣\n⁣\n#InTheMoment⁣\n⁣\nVideo by @alleymcglynn⁣\n⁣\nMusic by @morunas.music"
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "node": {
+       "shortcode": "DewxhTugF2T",
+       "is_video": true,
+       "product_type": "clips",
+       "__typename": "GraphVideo",
+       "taken_at_timestamp": 1792598422,
+       "edge_liked_by": {
+        "count": 133425
+       },
+       "edge_media_to_comment": {
+        "count": 8933
+       },
+       "like_and_view_counts_disabled": false,
+       "pinned_for_users": [],
+       "comments_disabled": false,
+       "edge_media_to_caption": {
+        "edges": [
+         {
+          "node": {
+           "text": "Ride @kade_2000’s Rampage line with him 🚵‍♂️\n\n@redbullusa’s freeride mountain bike competition, Red Bull Rampage, returned to the original Utah cliffs for its 25th anniversary.\n\ncaptured on @oakleymeta AI glasses."
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "node": {
+       "shortcode": "DeroUGDhF2D",
+       "is_video": true,
+       "product_type": "clips",
+       "__typename": "GraphVideo",
+       "taken_at_timestamp": 1792425706,
+       "edge_liked_by": {
+        "count": 156225
+       },
+       "edge_media_to_comment": {
+        "count": 13384
+       },
+       "like_and_view_counts_disabled": false,
+       "pinned_for_users": [],
+       "comments_disabled": false,
+       "edge_media_to_caption": {
+        "edges": [
+         {
+          "node": {
+           "text": "new NBA season prep with @jordanclarksons and @cbrickley603 🏀\n\nthe @nyknicks shooting guard joins the legendary basketball trainer in the gym for a custom workout."
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "node": {
+       "shortcode": "DeewiSPpCrm",
+       "is_video": true,
+       "product_type": "clips",
+       "__typename": "GraphVideo",
+       "taken_at_timestamp": 1791993604,
+       "edge_liked_by": {
+        "count": 487730
+       },
+       "edge_media_to_comment": {
+        "count": 15049
+       },
+       "like_and_view_counts_disabled": false,
+       "pinned_for_users": [],
+       "comments_disabled": false,
+       "edge_media_to_caption": {
+        "edges": [
+         {
+          "node": {
+           "text": "when dance meets Double Dutch 💃⁣\n⁣\n#InTheMoment⁣\n⁣\nVideo by @asuki_millecolle and @ikkyon_millecolle⁣\n⁣\nMusic by MagnusTheMagnus⁣\n⁣\nChoreography by @sangmyungdance"
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "node": {
+       "shortcode": "DecLR_vvrW6",
+       "is_video": true,
+       "product_type": "clips",
+       "__typename": "GraphVideo",
+       "taken_at_timestamp": 1791907183,
+       "edge_liked_by": {
+        "count": 327219
+       },
+       "edge_media_to_comment": {
+        "count": 12974
+       },
+       "like_and_view_counts_disabled": false,
+       "pinned_for_users": [],
+       "comments_disabled": false,
+       "edge_media_to_caption": {
+        "edges": [
+         {
+          "node": {
+           "text": "“Wouldn’t it be fun to have something like this in a room?”⁣\n⁣\nThat’s what painter @hichiyan686 asks herself before creating three-dimensional works like this vintage wall phone.⁣\n⁣\nHer creative process? “I close my eyes and imagine myself floating beneath the sea. In that imaginary underwater world, I turn the words, images and sensations I encounter into paintings.”⁣\n⁣\nVideo by @hichiyan686"
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "node": {
+       "shortcode": "DePb6WLuVae",
+       "is_video": true,
+       "product_type": "clips",
+       "__typename": "GraphVideo",
+       "taken_at_timestamp": 1791479431,
+       "edge_liked_by": {
+        "count": 768859
+       },
+       "edge_media_to_comment": {
+        "count": 24290
+       },
+       "like_and_view_counts_disabled": false,
+       "pinned_for_users": [],
+       "comments_disabled": false,
+       "edge_media_to_caption": {
+        "edges": [
+         {
+          "node": {
+           "text": "fur real, every single one of these is the best one 🐾⁣\n⁣\n#InTheMoment⁣\n⁣\nVideo by @miso_ara⁣\n⁣\nMusic by Vadim Chaimovich"
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "node": {
+       "shortcode": "DeM-xDCA2W5",
+       "is_video": true,
+       "product_type": "clips",
+       "__typename": "GraphVideo",
+       "taken_at_timestamp": 1791397052,
+       "edge_liked_by": {
+        "count": 581856
+       },
+       "edge_media_to_comment": {
+        "count": 16025
+       },
+       "like_and_view_counts_disabled": false,
+       "pinned_for_users": [],
+       "comments_disabled": false,
+       "edge_media_to_caption": {
+        "edges": [
+         {
+          "node": {
+           "text": "real-time AR 🤯⁣\n⁣\n#InTheMoment⁣\n⁣\nVideo and music by @alwayscodingsomething "
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "node": {
+       "shortcode": "DeKPYgBhbUz",
+       "is_video": true,
+       "product_type": "clips",
+       "__typename": "GraphVideo",
+       "taken_at_timestamp": 1791305302,
+       "edge_liked_by": {
+        "count": 204585
+       },
+       "edge_media_to_comment": {
+        "count": 9439
+       },
+       "like_and_view_counts_disabled": false,
+       "pinned_for_users": [],
+       "comments_disabled": false,
+       "edge_media_to_caption": {
+        "edges": [
+         {
+          "node": {
+           "text": "Celebrating our sweet 16 🎂🥳⁣\n⁣\n@amandarachlee made us a birthday treat entirely out of paper.⁣\n⁣\n“A cake is a must-have for any birthday celebration, but the disappointing part is that you don’t get to keep it after it’s been eaten. So I made a cake that would last forever.”⁣\n⁣\nVideo by @amandarachlee"
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "node": {
+       "shortcode": "Dd9RyBWBVih",
+       "is_video": true,
+       "product_type": "clips",
+       "__typename": "GraphVideo",
+       "taken_at_timestamp": 1790870385,
+       "edge_liked_by": {
+        "count": 819733
+       },
+       "edge_media_to_comment": {
+        "count": 21546
+       },
+       "like_and_view_counts_disabled": false,
+       "pinned_for_users": [],
+       "comments_disabled": false,
+       "edge_media_to_caption": {
+        "edges": [
+         {
+          "node": {
+           "text": "DIY fish squishy 🐟⁣\n⁣\n@yano4kaa.a made this squishy using stuff she already had at home like paper, tape and a balloon.⁣\n⁣\n“You don’t need a lot of specialized materials to be creative. I love showing people that even simple, everyday things can be turned into something fun and unique.”⁣\n⁣\nVideo by @yano4kaa.a⁣\n⁣\nMusic by @stuckinreboot"
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "node": {
+       "shortcode": "Dd7CJkhPvHf",
+       "is_video": true,
+       "product_type": "clips",
+       "__typename": "GraphVideo",
+       "taken_at_timestamp": 1790795094,
+       "edge_liked_by": {
+        "count": 885005
+       },
+       "edge_media_to_comment": {
+        "count": 13177
+       },
+       "like_and_view_counts_disabled": false,
+       "pinned_for_users": [],
+       "comments_disabled": false,
+       "edge_media_to_caption": {
+        "edges": [
+         {
+          "node": {
+           "text": "Four dancers, one crew 🔥💃⁣\n⁣\n@hook_dancekorea mixes Korean traditional culture, K-pop and hip-hop into their own style.⁣\n⁣\n“We capture a lot of the free-spirited vibes that naturally emerge during our practice sessions. Since our members have diverse hobbies outside of dance, we bring a rich variety of styles into our work.”⁣\n⁣\nVideo by @hook_dancekorea⁣\n⁣\nMusic by @xuminghao_o⁣ and @vernonline\n⁣\nChoreography by @teamsame_official"
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "node": {
+       "shortcode": "Dd6t2AbOPt_",
+       "is_video": true,
+       "product_type": "clips",
+       "__typename": "GraphVideo",
+       "taken_at_timestamp": 1790784230,
+       "edge_liked_by": {
+        "count": 187628
+       },
+       "edge_media_to_comment": {
+        "count": 7051
+       },
+       "like_and_view_counts_disabled": false,
+       "pinned_for_users": [],
+       "comments_disabled": false,
+       "edge_media_to_caption": {
+        "edges": [
+         {
+          "node": {
+           "text": "these POVs? a highlight reel of their own ⚾️\n\nthe @whitesox made it to the postseason, and we caught a game day from the field, the stands and everywhere in between with @oakleymeta AI glasses 👓"
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "node": {
+       "shortcode": "Dd4I5SIzZih",
+       "is_video": true,
+       "product_type": "clips",
+       "__typename": "GraphVideo",
+       "taken_at_timestamp": 1790697732,
+       "edge_liked_by": {
+        "count": 225447
+       },
+       "edge_media_to_comment": {
+        "count": 7481
+       },
+       "like_and_view_counts_disabled": false,
+       "pinned_for_users": [],
+       "comments_disabled": false,
+       "edge_media_to_caption": {
+        "edges": [
+         {
+          "node": {
+           "text": "@daisyedgarjones is our tour guide on the @sensesensibilityfilm set 🎬🕯️\n\nFrom candlelit balls to logwood-dyed costumes and Phyllis the dog (the unofficial star of the movie), get a behind-the-scenes look at the @focusfeatures adaptation of the classic Jane Austen novel.\n\n“What we’ve got here is a lot more of the women’s wildness… it’s a version of this that feels wild and alive and vibrant and free.”"
+          }
+         }
+        ]
+       }
+      }
+     }
+    ]
+   }
+  }
+ }
+}

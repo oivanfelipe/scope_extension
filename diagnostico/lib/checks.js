@@ -25,8 +25,25 @@ const bad = (found) => ({ status: 'bad', found });
 const na = (found) => ({ status: 'na', found });
 
 /** Tempo principal mostrado ao cliente: quando o conteúdo principal aparece (LCP); se faltar, a carga completa. */
+/** Tempo principal: o do Google PageSpeed (celular) quando disponível; senão, a medição local deste computador. */
 export function mainSpeedMs(d) {
+  if (d.psi?.status === 'ok' && d.psi.lcpMs != null) return d.psi.lcpMs;
   return d.speed.lcpMs ?? d.speed.loadMs ?? d.speed.fcpMs ?? null;
+}
+export const speedSource = (d) => (d.psi?.status === 'ok' && d.psi.lcpMs != null ? 'psi' : 'local');
+const SRC_TEXT = { psi: 'Google PageSpeed, celular', local: 'medido neste computador' };
+const NEED_PSI = 'Para medir, é preciso a chave gratuita do Google PageSpeed (veja Configurações).';
+const fmtMB = (b) => (b / 1048576).toFixed(1).replace('.', ',');
+
+export const SITE_TYPES = { ecommerce: 'Loja virtual', servicos: 'Serviços e captação de contatos', conteudo: 'Conteúdo e institucional' };
+
+/** Identifica o tipo do site pelos sinais coletados (plataforma, schema, carrinho, preços, botões de compra). */
+export function detectSiteType(d) {
+  const s = d.site || {};
+  const types = s.schemaTypes || [];
+  if (s.platform || types.some((t) => /^(Product|ProductGroup|Offer|AggregateOffer)$/.test(t)) || (s.cart && s.prices >= 3) || (s.buy && s.prices >= 1)) return 'ecommerce';
+  if (types.some((t) => /^(Article|BlogPosting|NewsArticle)$/.test(t))) return 'conteudo';
+  return 'servicos';
 }
 
 export function speedLevel(ms) {
@@ -46,7 +63,7 @@ export const CHECKS = [
     run: (d) => {
       const ms = mainSpeedMs(d);
       if (ms == null) return na('Não foi possível medir o tempo de carregamento.');
-      const t = `${fmtSeconds(ms)} segundos para o conteúdo principal aparecer (o ideal é até ${fmtSeconds(SPEED_LIMITS.OK_MS)}).`;
+      const t = `${fmtSeconds(ms)} segundos para o conteúdo principal aparecer (${SRC_TEXT[speedSource(d)]}). O ideal é até ${fmtSeconds(SPEED_LIMITS.OK_MS)}.`;
       return ({ ok, warn, bad })[speedLevel(ms)](t);
     },
   },
@@ -56,21 +73,38 @@ export const CHECKS = [
     cost: "Tudo o que vem depois também atrasa, em todas as páginas do site.",
     fix: "Revisar a hospedagem e ativar cache; em geral, um servidor melhor ou uma camada de cache resolvem.",
     run: (d) => {
-      const ms = d.speed.ttfbMs;
+      const ms = d.psi?.status === 'ok' && d.psi.ttfbMs != null ? d.psi.ttfbMs : d.speed.ttfbMs;
       if (ms == null) return na('Não foi possível medir o tempo de resposta do servidor.');
       const t = `O servidor leva ${fmtSeconds(ms)} segundos para começar a responder (o ideal é até 0,8).`;
       return ms <= 800 ? ok(t) : ms <= 1800 ? warn(t) : bad(t);
     },
   },
   {
-    id: 'V3', group: 'velocidade', name: 'A página é leve',
-    weight: 5, problem: "A página está pesada",
-    cost: "No celular e em conexões mais lentas, a página pesa e demora ainda mais para abrir.",
-    fix: "Reduzir imagens, scripts e plugins que não são usados.",
+    id: 'V3', group: 'velocidade', name: 'O site responde logo ao toque',
+    weight: 6, problem: "O site trava enquanto carrega",
+    cost: "Enquanto o site carrega, cliques e toques demoram para funcionar. O visitante acha que travou e vai embora.",
+    fix: "Reduzir scripts de terceiros (chat, pixels e plugins) e adiar o que não é essencial para a primeira tela.",
     run: (d) => {
-      const n = d.speed.requests;
-      const t = `A página carrega ${n} arquivos (o ideal é até 80).`;
-      return n <= 80 ? ok(t) : n <= 150 ? warn(t) : bad(t);
+      const ms = d.psi?.status === 'ok' ? d.psi.tbtMs : null;
+      if (ms == null) return na(NEED_PSI);
+      const t = `O site fica cerca de ${Math.round(ms)} ms sem responder ao toque durante o carregamento (o ideal é até 200 ms; Google PageSpeed, celular).`;
+      return ms <= 200 ? ok(t) : ms <= 600 ? warn(t) : bad(t);
+    },
+  },
+  {
+    id: 'V4', group: 'velocidade', name: 'A página tem peso adequado',
+    weight: 5, problem: "A página está pesada",
+    cost: "Quem usa dados móveis ou conexão lenta espera mais, e cada megabyte a mais consome o plano de internet do cliente.",
+    fix: "Comprimir imagens (formato WebP), remover scripts e plugins que não são usados e carregar imagens só quando aparecem na tela.",
+    run: (d) => {
+      const bytes = d.psi?.status === 'ok' ? d.psi.bytes : null;
+      if (bytes == null) return na(NEED_PSI);
+      const mb = bytes / 1048576;
+      const t = `A página pesa ${fmtMB(bytes)} MB no total (o ideal é até 2 MB; Google PageSpeed).`;
+      if (mb <= 2) return ok(t);
+      // se o site abre rápido, o peso não pode ser tratado como problema grave
+      const fast = speedLevel(mainSpeedMs(d)) === 'ok';
+      return mb <= 4 || fast ? warn(fast ? `${t} Abre rápido, mas pesa para quem usa conexão lenta.` : t) : bad(t);
     },
   },
 
@@ -226,14 +260,14 @@ export const CHECKS = [
     run: (d) => (d.conversion.whatsapp ? ok('Há link ou botão de WhatsApp.') : bad('Não encontramos WhatsApp na página.')),
   },
   {
-    id: 'C3', group: 'conversao', name: 'Tem formulário de contato',
+    id: 'C3', group: 'conversao', types: ['servicos'], name: 'Tem formulário de contato',
     weight: 6, problem: "Sem formulário de contato",
     cost: "Quem não quer ligar nem chamar no WhatsApp não tem como deixar o contato, e a oportunidade se perde.",
     fix: "Criar um formulário curto (nome, telefone e e-mail) e ligá-lo ao atendimento.",
     run: (d) => (d.conversion.forms > 0 ? ok(`${d.conversion.forms} formulário(s) na página.`) : bad('Não encontramos formulário de contato na página.')),
   },
   {
-    id: 'C4', group: 'conversao', name: 'Tem telefone para clicar',
+    id: 'C4', group: 'conversao', types: ['servicos'], name: 'Tem telefone para clicar',
     weight: 4, problem: "Telefone não clicável",
     cost: "No celular, a pessoa precisa copiar o número, e parte desiste nesse ponto.",
     fix: "Transformar o telefone em link de chamada.",
@@ -246,10 +280,36 @@ export const CHECKS = [
     fix: "Incluir depoimentos reais, avaliações do Google e casos de clientes.",
     run: (d) => (d.conversion.socialProof ? ok('Encontramos depoimentos, avaliações ou cases.') : bad('Não identificamos depoimentos, avaliações ou cases na página.')),
   },
+  {
+    id: 'C6', group: 'conversao', types: ['ecommerce'], name: 'Tem busca de produtos',
+    weight: 7, problem: "Sem busca de produtos",
+    cost: "Quem já sabe o que quer não encontra rápido e desiste; a busca é um dos caminhos que mais levam à compra.",
+    fix: "Colocar uma barra de busca visível no topo, com sugestões de produtos.",
+    run: (d) => (d.site?.search ? ok('Há busca de produtos no site.') : bad('Não encontramos busca de produtos.')),
+  },
+  {
+    id: 'C7', group: 'conversao', types: ['ecommerce'], name: 'Carrinho acessível',
+    weight: 8, problem: "Carrinho não encontrado",
+    cost: "Sem um carrinho visível, o cliente não vê o que já escolheu e a compra fica menos fluida.",
+    fix: "Manter o ícone do carrinho sempre visível no topo, com a quantidade de itens.",
+    run: (d) => (d.site?.cart || d.site?.buy ? ok('O carrinho ou o botão de compra está presente.') : bad('Não encontramos carrinho nem botão de compra.')),
+  },
+  {
+    id: 'C8', group: 'conversao', types: ['ecommerce'], name: 'Mostra condições de compra',
+    weight: 7, problem: "Condições de compra pouco visíveis",
+    cost: "Dúvidas sobre frete, parcelamento, formas de pagamento e troca são motivo comum de abandono antes da compra.",
+    fix: "Destacar na primeira tela: frete, parcelamento, formas de pagamento e política de troca.",
+    run: (d) => {
+      const c = d.site?.conditions || [];
+      const t = c.length ? `Encontramos menção a: ${c.join(', ')}.` : 'Não encontramos menção a frete, parcelamento, pagamento ou troca.';
+      return c.length >= 3 ? ok(t) : c.length >= 1 ? warn(t) : bad(t);
+    },
+  },
 ];
 
-export function runChecks(data, net = {}) {
-  return CHECKS.map((c) => {
+/** Roda os itens que se aplicam ao tipo de site (itens de outro tipo nem aparecem). */
+export function runChecks(data, net = {}, siteType = detectSiteType(data)) {
+  return CHECKS.filter((c) => !c.types || c.types.includes(siteType)).map((c) => {
     let res;
     try { res = c.run(data, net); } catch (e) { res = na(`Erro na verificação: ${e.message}`); }
     return { id: c.id, group: c.group, name: c.name, problem: c.problem, cost: c.cost, fix: c.fix, weight: c.weight, ...res };
@@ -261,9 +321,9 @@ const SCORE = { ok: 1, warn: 0.5, bad: 0 };
 
 export function siteHeadline(o) {
   const fix = o.bad + o.warn;
-  return o.level === 'bad' ? `Seu site tem ${fix} pontos a corrigir que podem estar afastando clientes.`
-    : o.level === 'warn' ? `Seu site está razoável, mas tem ${fix} pontos a corrigir.`
-      : fix === 0 ? 'Seu site está bem estruturado.' : `Seu site está bem estruturado. Restam ${fix} ajustes.`;
+  return o.level === 'bad' ? `Seu site ${fix === 1 ? 'tem 1 ponto' : `tem ${fix} pontos`} a corrigir que podem estar afastando clientes.`
+    : o.level === 'warn' ? `Seu site está razoável, mas ${fix === 1 ? 'tem 1 ponto' : `tem ${fix} pontos`} a corrigir.`
+      : fix === 0 ? 'Seu site está bem estruturado.' : `Seu site está bem estruturado. ${fix === 1 ? 'Resta 1 ajuste' : `Restam ${fix} ajustes`}.`;
 }
 
 /** Placar por área e geral. 'na' não entra na conta. Serve a qualquer módulo (site, Instagram, anúncios). */

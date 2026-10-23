@@ -1,3 +1,5 @@
+import { teamConfig } from './team.js';
+
 // Resumo e leitura de conteúdo por IA via API compatível com OpenAI (Groq ou xAI/Grok).
 // Sem a opção "enviar conteúdo", só o resultado do checklist vai ao provedor.
 export const PROVIDERS = {
@@ -6,19 +8,15 @@ export const PROVIDERS = {
 };
 
 const KEY = 'aiSettings';
-
-/** Chave da equipe: vem de lib/config.local.js, que fica fora do GitHub e só existe no pacote distribuído. */
-async function teamDefaults() {
-  try { return (await import('./config.local.js')).DEFAULT_AI || {}; } catch { return {}; }
-}
+const teamDefaults = async () => (await teamConfig()).ai;
 
 export async function loadAi() {
   let stored = {};
   try { stored = (await chrome.storage.local.get(KEY))[KEY] || {}; } catch { /* sem storage */ }
-  const team = await teamDefaults();
-  return { provider: 'groq', apiKey: '', model: '', sendContent: true, ...stored, hasTeamKey: !!team.apiKey };
+  const team = await teamConfig();
+  return { provider: 'groq', apiKey: '', model: '', sendContent: true, autoAi: true, psiKey: '', ...stored, hasTeamKey: !!team.ai.apiKey, hasTeamPsi: !!team.psiKey };
 }
-export const saveAi = (settings) => chrome.storage.local.set({ [KEY]: { provider: settings.provider, apiKey: settings.apiKey, model: settings.model, sendContent: settings.sendContent !== false } });
+export const saveAi = (settings) => chrome.storage.local.set({ [KEY]: { provider: settings.provider, apiKey: settings.apiKey, model: settings.model, sendContent: settings.sendContent !== false, autoAi: settings.autoAi !== false, psiKey: settings.psiKey || '' } });
 
 /** Sem chave própria, usa a da equipe (provedor e modelo incluídos). */
 export function withDefaults(settings, team = {}) {
@@ -29,7 +27,7 @@ export function withDefaults(settings, team = {}) {
 export async function resolveAi(settings) { return withDefaults(settings, await teamDefaults()); }
 
 const SYSTEM = `Você é consultor sênior de marketing digital da V4 Company. Escreve para ajudar um vendedor a conduzir uma conversa com o dono de uma empresa que NÃO entende de marketing.
-Regras: português do Brasil; frases curtas e linguagem simples, sem jargões (se citar um termo técnico, explique em poucas palavras); use SOMENTE os dados fornecidos, sem inventar números, porcentagens nem fatos; não use travessões; não elogie demais nem faça promessas de resultado.
+Regras: considere o tipo de site informado (em loja virtual, não cobre formulário de contato: foque em compra, confiança, frete e condições); português do Brasil; frases curtas e linguagem simples, sem jargões (se citar um termo técnico, explique em poucas palavras); use SOMENTE os dados fornecidos, sem inventar números, porcentagens nem fatos; não use travessões; não elogie demais nem faça promessas de resultado.
 Separe o que é dado medido (itens do checklist) do que é opinião sua sobre o conteúdo lido, usando apenas os títulos numerados que forem pedidos, sem títulos extras.
 Escreva em texto simples, sem markdown (sem asteriscos, sem cerquilhas). Você recebe apenas texto: não descreva imagens, fotos nem vídeos. Se o conteúdo for insuficiente para opinar, diga isso em uma frase.`;
 
@@ -53,7 +51,7 @@ export function contentBlock(ctxId, c) {
     // Sem legendas nem bio com texto de verdade a IA só especularia: nesse caso a leitura não é pedida.
     const bio = clip(String(c.bio ?? '').replace(/[\d.,]+\s*(?:mil|mi|k|m)?\s*(?:posts?|publica[çc][õo]es|seguidores|followers|seguindo|following)/gi, ''), 400);
     const posts = (c.posts || []).filter((p) => clip(p.caption, 300).length >= 15).slice(0, 12).map((p, i) => `${i + 1}. [${p.isReel ? 'Reels' : 'Post'}, ${p.likes ?? '?'} curtidas, ${p.comments ?? 0} comentários] ${clip(p.caption, 280)}`);
-    return [bio.length >= 30 && `Bio e cabeçalho do perfil: ${bio}`, posts.length && `Legendas dos posts recentes:\n${posts.join('\n')}`].filter(Boolean).join('\n');
+    return [c.links?.length && `Link na bio: ${c.links.join(', ')}`, bio.length >= 30 && `Bio e cabeçalho do perfil: ${bio}`, posts.length && `Legendas dos posts recentes:\n${posts.join('\n')}`].filter(Boolean).join('\n');
   }
   if (ctxId === 'ads') {
     const copies = (c.copies || []).slice(0, 10).map((t, i) => `${i + 1}. ${clip(t, 300)}`);
@@ -68,11 +66,11 @@ const READING = {
   ads: 'os ângulos e promessas usados, os gatilhos mentais presentes e o que falta testar.',
 };
 
-export function buildMessages({ ctx, client, data, results, summary, bigSentence, content }) {
+export function buildMessages({ ctx, client, data, results, summary, bigSentence, content, extra }) {
   const o = summary.overall;
   const lines = results.map((r) => `- [${STATUS[r.status]}] ${r.name}: ${r.found}`).join('\n');
   const block = contentBlock(ctx.id, content);
-  const user = `Análise: ${ctx.title}${client ? `\nCliente: ${client}` : ''}\nEndereço: ${data.url}
+  const user = `Análise: ${ctx.title}${client ? `\nCliente: ${client}` : ''}\nEndereço: ${data.url}${extra ? `\n${extra}` : ''}
 Resultado geral: ${o.ok} de ${o.total} itens bons.${bigSentence ? `\nDestaque: ${bigSentence}` : ''}
 
 Itens verificados (dados medidos):

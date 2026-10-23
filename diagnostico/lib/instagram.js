@@ -78,6 +78,48 @@ export function parseProfileText(text) {
   };
 }
 
+/**
+ * Lê a resposta da API interna do perfil (/api/v1/users/web_profile_info/): fonte exata de seguidores,
+ * bio, link na bio e dos posts recentes. Devolve null se o JSON não tiver o formato esperado.
+ */
+export function parseProfileApi(json) {
+  const u = json?.data?.user;
+  if (!u || typeof u !== 'object') return null;
+  const media = u.edge_owner_to_timeline_media;
+  const hide = !!u.hide_like_and_view_counts;
+  const urls = [u.external_url, ...(Array.isArray(u.bio_links) ? u.bio_links.map((l) => l?.url) : [])].filter((x) => typeof x === 'string' && x.trim());
+  const posts = (media?.edges || []).map((e) => e?.node).filter(Boolean)
+    .filter((n) => !(Array.isArray(n.pinned_for_users) && n.pinned_for_users.length)) // fixados distorcem a frequência
+    .map((n) => {
+      const isReel = n.product_type === 'clips';
+      const hidden = hide || n.like_and_view_counts_disabled || !(n.edge_liked_by?.count >= 0);
+      return {
+        url: `https://www.instagram.com/${isReel ? 'reel' : 'p'}/${n.shortcode}/`,
+        isReel,
+        likes: hidden ? null : n.edge_liked_by.count,
+        comments: n.edge_media_to_comment?.count ?? 0,
+        ts: n.taken_at_timestamp ? n.taken_at_timestamp * 1000 : null,
+        caption: String(n.edge_media_to_caption?.edges?.[0]?.node?.text || '').slice(0, 300),
+      };
+    });
+  return {
+    handle: u.username || '', fullName: u.full_name || '', bio: u.biography || '',
+    followers: u.edge_followed_by?.count ?? null, following: u.edge_follow?.count ?? null, postsCount: media?.count ?? null,
+    isPrivate: !!u.is_private, isBusiness: !!u.is_business_account, category: u.category_name || '',
+    links: [...new Set(urls)], posts,
+  };
+}
+
+/**
+ * Estado do link na bio: 'yes' | 'no' | 'unknown'.
+ * Só afirma 'no' quando a API (fonte exata) respondeu e nada na página indica um link; sem a API, a ausência vira 'unknown'.
+ */
+export function bioLinkState({ api, domLink, bioText = '' }) {
+  if (api?.links?.length || domLink) return 'yes';
+  if (/\b(https?:\/\/|www\.|linktr\.ee|beacons\.ai|bit\.ly|wa\.me)\S+/i.test(`${bioText} ${api?.bio || ''}`)) return 'yes';
+  return api ? 'no' : 'unknown';
+}
+
 /** Roda na aba do Instagram. Devolve o que dá para ver no perfil aberto. */
 export function collectInstagram() {
   const reserved = /^(explore|reels?|direct|accounts|stories|p|tv|about|legal|developers|web|challenge|emails|session)$/i;
@@ -91,7 +133,8 @@ export function collectInstagram() {
   const ogOwn = og.toLowerCase().includes(`(@${handle.toLowerCase()})`) ? og : '';
   const pinned = (a) => !!a.querySelector('svg[aria-label*="Pinned" i], svg[aria-label*="Fixado" i], svg[aria-label*="fixada" i]');
   const links = [...document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]')].filter((a) => !pinned(a)).map((a) => new URL(a.getAttribute('href'), location.origin).href.split('?')[0]);
-  const external = header ? [...header.querySelectorAll('a[href]')].some((a) => /l\.instagram\.com|^https?:\/\/(?!(www\.)?instagram\.com)/i.test(a.href)) : false;
+  const inGrid = (a) => !!a.closest('article, [role="tablist"]') || /\/(p|reel)\//.test(a.getAttribute('href') || '');
+  const external = [...document.querySelectorAll('a[href]')].some((a) => !inGrid(a) && /l\.instagram\.com|^https?:\/\/(?!(www\.|help\.|about\.|l\.)?instagram\.com|(www\.)?facebook\.com\/(help|privacy)|(www\.)?meta\.com)/i.test(a.href));
   return {
     host: 'instagram.com', origin: location.origin, url: location.href, handle, isProfile,
     isPrivate: /this account is private|esta conta [ée] privada/i.test(document.body.innerText.slice(0, 5000)),
@@ -103,23 +146,24 @@ export function collectInstagram() {
 const DAY = 86400000;
 
 export function analyzeIg(profile, posts, now = Date.now()) {
-  const fromDom = parseProfileText(profile.headerItems);
-  const fromOg = parseProfileText(profile.ogText);
-  const followers = fromDom.followers ?? fromOg.followers ?? null;
+  const fromDom = parseProfileText(profile.headerItems || '');
+  const fromOg = parseProfileText(profile.ogText || '');
+  const followers = profile.followers ?? fromDom.followers ?? fromOg.followers ?? null;
   const withLikes = posts.filter((p) => p.likes != null);
   const interactions = (p) => (p.likes ?? 0) + (p.comments ?? 0);
   const avgInteractions = posts.length ? posts.reduce((s, p) => s + interactions(p), 0) / posts.length : null;
   const dated = posts.filter((p) => p.ts).sort((a, b) => a.ts - b.ts);
   const spanDays = dated.length >= 2 ? (dated[dated.length - 1].ts - dated[0].ts) / DAY : null;
   return {
-    followers, postsCount: fromDom.posts ?? fromOg.posts ?? null,
+    followers, postsCount: profile.postsCount ?? fromDom.posts ?? fromOg.posts ?? null,
     sampled: posts.length, likesHidden: posts.length > 0 && withLikes.length === 0,
     engagementPct: followers && avgInteractions != null ? (avgInteractions / followers) * 100 : null,
     avgComments: posts.length ? posts.reduce((s, p) => s + (p.comments ?? 0), 0) / posts.length : null,
     perWeek: spanDays ? ((dated.length - 1) / spanDays) * 7 : null,
     daysSinceLast: dated.length ? Math.floor((now - dated[dated.length - 1].ts) / DAY) : null,
     reelShare: posts.length ? posts.filter((p) => p.isReel).length / posts.length : null,
-    bioLink: profile.bioLink,
+    bioLink: profile.bioLinkState ?? (profile.bioLink ? 'yes' : 'unknown'),
+    bioLinkUrl: profile.bioLinkUrl || '',
   };
 }
 
@@ -200,15 +244,15 @@ export const IG_CHECKS = [
     weight: 7, problem: "Sem link na bio",
     cost: "Quem se interessa não tem para onde ir, e o perfil não gera contato nem venda.",
     fix: "Colocar na bio um link para o WhatsApp ou para uma página de contato.",
-    run: (a) => (a.bioLink ? ok('O perfil tem link na bio.') : bad('Não encontramos link na bio.')),
+    run: (a) => (a.bioLink === 'yes' ? ok(`O perfil tem link na bio${a.bioLinkUrl ? ` (${a.bioLinkUrl})` : ''}.`) : a.bioLink === 'no' ? bad('O perfil não tem link na bio.') : na('Não foi possível confirmar se há link na bio. Confira no perfil.')),
   },
 ];
 
 export function igHeadline(o) {
   const fix = o.bad + o.warn;
-  return o.level === 'bad' ? `Seu Instagram tem ${fix} pontos a corrigir que podem estar travando o alcance e as vendas.`
-    : o.level === 'warn' ? `Seu Instagram está razoável, mas tem ${fix} pontos a corrigir.`
-      : fix === 0 ? 'Seu Instagram está bem cuidado.' : `Seu Instagram está bem cuidado. Restam ${fix} ajustes.`;
+  return o.level === 'bad' ? `Seu Instagram ${fix === 1 ? 'tem 1 ponto' : `tem ${fix} pontos`} a corrigir que podem estar travando o alcance e as vendas.`
+    : o.level === 'warn' ? `Seu Instagram está razoável, mas ${fix === 1 ? 'tem 1 ponto' : `tem ${fix} pontos`} a corrigir.`
+      : fix === 0 ? 'Seu Instagram está bem cuidado.' : `Seu Instagram está bem cuidado. ${fix === 1 ? 'Resta 1 ajuste' : `Restam ${fix} ajustes`}.`;
 }
 
 export function runIgChecks(a) {

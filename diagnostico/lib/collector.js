@@ -94,8 +94,9 @@ export async function collectPage() {
     const cs = getComputedStyle(el);
     return cs.visibility !== 'hidden' && cs.display !== 'none' && Number(cs.opacity) > 0;
   };
-  const CTA_RE = /(fale|falar|entre em contato|contato|solicit|or[çc]amento|agende|agendar|compr|quero|saiba mais|conhe[çc]a|come[çc]|teste|gr[aá]tis|baixar|download|whatsapp|cadastr|assine|contrat|simul|diagn[óo]stico|reserv|pedir|ver (planos|produtos|ofertas))/i;
-  const buttonLike = (el) => el.tagName === 'BUTTON' || el.getAttribute('role') === 'button' || (el.tagName === 'INPUT' && /submit|button/.test(el.type)) || /(^|[\s_-])(btn|button|cta|botao|bot[ãa]o)([\s_-]|$)/i.test(el.className?.toString?.() || '');
+  const CTA_RE = /(fale|falar|entre em contato|contato|solicit|or[çc]amento|agende|agendar|compr|quero|saiba mais|conhe[çc](a|er)|come[çc]|teste|gr[aá]tis|baixar|download|whatsapp|cadastr|assine|contrat|simul|diagn[óo]stico|reserv|pedir|pe[çc]a|descubr|confira|explor|aproveit|ver (mais|planos|produtos|ofertas|cole[çc][aã]o|loja|cardápio)|shop|buy)/i;
+  const filled = (el) => { const cs = getComputedStyle(el); const bg = cs.backgroundColor; const r = el.getBoundingClientRect(); return !!bg && bg !== 'transparent' && !/rgba\(.*,\s*0\)$/.test(bg) && r.width >= 70 && r.height >= 28; };
+  const buttonLike = (el) => el.tagName === 'BUTTON' || el.getAttribute('role') === 'button' || (el.tagName === 'INPUT' && /submit|button/.test(el.type)) || /(^|[\s_-])(btn|button|cta|botao|bot[ãa]o)([\s_-]|$)/i.test(el.className?.toString?.() || '') || (el.tagName === 'A' && filled(el));
   const ctaEl = qa('a, button, input[type=submit], [role=button]').find((el) => {
     const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim();
     if (!text || text.length > 60 || !CTA_RE.test(text) || !buttonLike(el) || !visible(el)) return false;
@@ -103,6 +104,12 @@ export async function collectPage() {
     return r.top < window.innerHeight && r.bottom > 0;
   });
   const hrefs = qa('a[href]').map((a) => a.getAttribute('href') || '');
+  // HTML renderizado inteiro, incluindo o conteúdo de shadow DOM aberto: widgets de WhatsApp costumam viver ali ou em onclick/scripts.
+  const shadowHtml = [];
+  const walk = (root) => { for (const el of root.querySelectorAll('*')) if (el.shadowRoot) { shadowHtml.push(el.shadowRoot.innerHTML); walk(el.shadowRoot); } };
+  try { walk(d); } catch { /* ignora */ }
+  const fullHtml = `${d.documentElement.outerHTML.slice(0, 3000000)}\n${shadowHtml.join('\n').slice(0, 500000)}`;
+  const WA_RE = /(wa\.me\/|api\.whatsapp\.com|web\.whatsapp\.com|whatsapp:\/\/|wa\.link\/|chat\.whatsapp\.com|joinchat|whatsapp-?(button|widget|float))/i;
   const formFrames = qa('iframe').filter((f) => /typeform|hsforms|hubspot|rdstation|jotform|forms\.gle|docs\.google\.com\/forms|formulario|calendly/i.test(f.src));
   const realForms = qa('form').filter((f) => {
     if (f.getAttribute('role') === 'search') return false;
@@ -110,11 +117,37 @@ export async function collectPage() {
     return fields.some((i) => /email|tel/.test(i.type)) || f.querySelector('textarea') || fields.length >= 2;
   });
   const bodyText = (d.body?.innerText || '').slice(0, 200000);
+  const schemaTypes = [];
+  const collectTypes = (n) => { if (!n || typeof n !== 'object') return; if (Array.isArray(n)) return n.forEach(collectTypes); const t = n['@type']; (Array.isArray(t) ? t : [t]).filter(Boolean).forEach((x) => schemaTypes.push(String(x))); if (n['@graph']) collectTypes(n['@graph']); if (n.mainEntity) collectTypes(n.mainEntity); if (n.itemListElement) collectTypes(n.itemListElement); if (n.item) collectTypes(n.item); };
+  for (const sc of qa('script[type="application/ld+json"]')) { try { collectTypes(JSON.parse(sc.textContent)); } catch { /* json inválido */ } }
+  const platformOf = () => {
+    if (window.Shopify || /cdn\.shopify\.com/.test(seen)) return 'Shopify';
+    if (window.LS || /nuvemshop|tiendanube|mitiendanube/i.test(seen)) return 'Nuvemshop';
+    if (window.vtex || /vtexassets|vteximg|vtex\.com\.br/i.test(seen)) return 'VTEX';
+    if (d.body?.classList.contains('woocommerce') || /wc-ajax|woocommerce/i.test(seen)) return 'WooCommerce';
+    if (/lojaintegrada|awsli\.com\.br/i.test(seen)) return 'Loja Integrada';
+    if (/tray\.com\.br|traycdn|tcdn\.com\.br/i.test(seen)) return 'Tray';
+    if (/yampi\.(io|com)/i.test(seen)) return 'Yampi';
+    if (/mage\/|Magento/i.test(`${seen}${d.documentElement.className}`)) return 'Magento';
+    if (/wixstores|wix-ecommerce/i.test(seen)) return 'Wix Stores';
+    return '';
+  };
+  const bodyAll = (d.body?.innerText || '');
+  const cartRe = /\/(cart|carrinho|checkout|sacola|basket)(\/|$|\?)/i;
+  const site = {
+    platform: platformOf(),
+    schemaTypes: uniq(schemaTypes).slice(0, 30),
+    cart: hrefs.some((h) => cartRe.test(h)) || qa('[class*="cart" i], [class*="carrinho" i], [class*="sacola" i], [aria-label*="carrinho" i], [aria-label*="cart" i]').length > 0,
+    buy: qa('button, a, input[type=submit]').some((el) => /(comprar|adicionar (ao|à) (carrinho|sacola)|add to cart|buy now|compre agora)/i.test(el.innerText || el.value || '')),
+    prices: (bodyAll.match(/R\$\s?\d/g) || []).length,
+    search: qa('input[type=search], [role=search], form[action*="search" i], form[action*="busca" i], input[name="q"], input[name="s"], [aria-label*="buscar" i], [aria-label*="pesquis" i], [aria-label*="search" i]').length > 0,
+    conditions: ['frete', 'parcel', 'pix', 'cartão|cartao', 'boleto', 'troca', 'devolu[çc][ãa]o', 'entrega', 'garantia'].filter((w) => new RegExp(w, 'i').test(bodyAll)),
+  };
   const proofRe = /(depoimento|avalia[çc][õo]es|o que (nossos )?(clientes|alunos|pacientes) (dizem|falam)|cases? de sucesso|testimonial|reviews?|clientes satisfeitos|resultados (reais|comprovados)|nossos clientes|quem j[áa] (comprou|contratou|usa))/i;
   const proofEl = qa('[class*="testimonial" i], [class*="depoimento" i], [id*="testimonial" i], [id*="depoimento" i], [class*="review" i]').length > 0;
   const conversion = {
     ctaAboveFold: ctaEl ? (ctaEl.innerText || ctaEl.value || '').trim().slice(0, 40) : null,
-    whatsapp: hrefs.some((h) => /wa\.me|api\.whatsapp\.com|web\.whatsapp\.com|whatsapp:\/\//i.test(h)) || /wa\.me|api\.whatsapp\.com/.test(seen) || qa('[class*="whats" i], [id*="whats" i]').length > 0,
+    whatsapp: WA_RE.test(fullHtml) || WA_RE.test(seen) || qa('[aria-label*="whats" i], [title*="whats" i], img[alt*="whats" i], img[src*="whats" i], [class*="whats" i], [id*="whats" i]').length > 0,
     phone: hrefs.some((h) => /^tel:/i.test(h)),
     forms: realForms.length + formFrames.length,
     socialProof: proofRe.test(bodyText) || proofEl || /aggregateRating|"review"/i.test(inline),
@@ -132,6 +165,6 @@ export async function collectPage() {
 
   return {
     url: location.href, origin: location.origin, host: location.hostname.replace(/^www\./, ''),
-    title: d.title || '', speed, structure, tracking, conversion, content,
+    title: d.title || '', speed, structure, tracking, conversion, content, site,
   };
 }

@@ -222,9 +222,9 @@ export const AD_CHECKS = [
 
 export function adsHeadline(o) {
   const fix = o.bad + o.warn;
-  return o.level === 'bad' ? `Seus anúncios na Meta têm ${fix} pontos a corrigir que podem estar desperdiçando investimento.`
-    : o.level === 'warn' ? `Seus anúncios na Meta estão razoáveis, mas têm ${fix} pontos a corrigir.`
-      : fix === 0 ? 'Seus anúncios na Meta estão bem estruturados.' : `Seus anúncios na Meta estão bem estruturados. Restam ${fix} ajustes.`;
+  return o.level === 'bad' ? `Seus anúncios na Meta ${fix === 1 ? 'têm 1 ponto' : `têm ${fix} pontos`} a corrigir que podem estar desperdiçando investimento.`
+    : o.level === 'warn' ? `Seus anúncios na Meta estão razoáveis, mas ${fix === 1 ? 'têm 1 ponto' : `têm ${fix} pontos`} a corrigir.`
+      : fix === 0 ? 'Seus anúncios na Meta estão bem estruturados.' : `Seus anúncios na Meta estão bem estruturados. ${fix === 1 ? 'Resta 1 ajuste' : `Restam ${fix} ajustes`}.`;
 }
 
 export function runAdChecks(a) {

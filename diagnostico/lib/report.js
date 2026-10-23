@@ -14,12 +14,12 @@ export function speedSentence(ms) {
 const SITE_CTX = { title: 'Diagnóstico rápido do site', groups: GROUPS };
 
 /** Relatório em Markdown: o mesmo checklist da tela, para anexar à proposta. */
-export function toMarkdown({ client, data, results, summary, date, ctx = SITE_CTX, bigSentence, bigContext, ai }) {
+export function toMarkdown({ client, data, results, summary, date, ctx = SITE_CTX, bigSentence, bigContext, ai, siteTypeLabel }) {
   const o = summary.overall;
   const sentence = bigSentence ?? speedSentence(mainSpeedMs(data));
   const L = [];
   L.push(`# ${ctx.title}${client ? ` — ${client}` : ''}`, '');
-  L.push(`- **Endereço:** ${data.url}`, `- **Data:** ${date}`, '');
+  L.push(`- **Endereço:** ${data.url}`, ...(siteTypeLabel ? [`- **Tipo de site:** ${siteTypeLabel}`] : []), `- **Data:** ${date}`, '');
   L.push(`## Resultado: ${o.ok} de ${o.total} itens estão bons`, '', o.headline, '');
   if (sentence) L.push(`> ${sentence}${bigContext ? ` ${bigContext}` : ''}`, '');
   const losses = topLosses(results);

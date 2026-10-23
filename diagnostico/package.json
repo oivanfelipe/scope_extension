@@ -1,6 +1,6 @@
 {
   "name": "diagnostico-rapido",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Extensão Chrome Diagnóstico Rápido (V4 Company) — checklist de vendas do site",
