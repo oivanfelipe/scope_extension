@@ -1,0 +1,11 @@
+{
+  "name": "diagnostico-rapido",
+  "version": "0.4.1",
+  "private": true,
+  "type": "module",
+  "description": "Extensão Chrome Diagnóstico Rápido (V4 Company) — checklist de vendas do site",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "pack": "bash scripts/pack.sh"
+  }
+}
