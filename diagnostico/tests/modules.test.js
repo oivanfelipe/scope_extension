@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCount, parsePostHtml, parseProfileText, parseProfileApi, bioLinkState, analyzeIg, runIgChecks, engagementBenchmark, igHeadline, IG_GROUPS } from '../lib/instagram.js';
+import { parseCount, parsePostHtml, parseProfileText, parseProfileApi, parseFeedApi, toMs, fillDates, bioLinkState, analyzeIg, runIgChecks, engagementBenchmark, igHeadline, IG_GROUPS } from '../lib/instagram.js';
 import { readFileSync } from 'node:fs';
 import { parseAdCard, analyzeAds, runAdChecks, adsHeadline, AD_GROUPS, isAdLibraryUrl } from '../lib/adlibrary.js';
 import { summarize } from '../lib/checks.js';
@@ -270,4 +270,86 @@ test('Instagram: link na bio em três estados nos itens e a análise usa seguido
   assert.match(by(runIgChecks(a), 'I6').found, /tem link na bio \(http/);
   assert.equal(by(runIgChecks({ ...a, bioLink: 'no' }), 'I6').status, 'bad');
   assert.equal(by(runIgChecks({ ...a, bioLink: 'unknown' }), 'I6').status, 'na');
+});
+
+const feedFixture = () => JSON.parse(readFileSync(new URL('./fixtures/ig-feed.json', import.meta.url), 'utf8'));
+
+test('toMs aceita segundos, milissegundos, texto numérico e ISO', () => {
+  assert.equal(toMs(1792787702), 1792787702000);
+  assert.equal(toMs('1792787702'), 1792787702000);
+  assert.equal(toMs(1792787702000), 1792787702000);
+  assert.equal(toMs('2026-10-23T12:00:00Z'), Date.parse('2026-10-23T12:00:00Z'));
+  assert.equal(toMs(null), null);
+  assert.equal(toMs(''), null);
+  assert.equal(toMs('abc'), null);
+});
+
+test('feed real: 12 posts com data, curtidas, comentários e Reels', () => {
+  const f = parseFeedApi(feedFixture());
+  assert.equal(f.posts.length, 12);
+  assert.equal(f.more, true);
+  assert.match(f.nextMaxId, /^\d+_\d+$/);
+  const p = f.posts[0];
+  assert.match(p.url, /^https:\/\/www\.instagram\.com\/reel\/De2bNIWSZdB\/$/);
+  assert.equal(p.ts, 1792787702000);
+  assert.equal(p.likes, 108357);
+  assert.equal(p.comments, 2437);
+  assert.equal(p.isReel, true);
+  assert.ok(p.caption.length > 0);
+  assert.equal(parseFeedApi({}), null);
+  assert.equal(parseFeedApi({ items: 'x' }), null);
+});
+
+test('feed: fixados saem, curtidas ocultas viram nulo', () => {
+  const j = feedFixture();
+  j.items[0].timeline_pinned_user_ids = [123];
+  j.items[1].like_and_view_counts_disabled = true;
+  j.items[2].like_count = undefined;
+  const f = parseFeedApi(j);
+  assert.equal(f.posts.length, 11);
+  assert.equal(f.posts[0].likes, null);
+  assert.equal(f.posts[1].likes, null);
+  assert.equal(f.posts[2].likes, 487825); // os demais seguem normais
+});
+
+test('frequência: calculada a partir das datas do feed real', () => {
+  const f = parseFeedApi(feedFixture());
+  const last = f.posts[0].ts;
+  const a = analyzeIg({ followers: 1000000, bioLinkState: 'yes' }, f.posts, last + 2 * 86400000);
+  assert.equal(a.datedCount, 12);
+  assert.equal(a.daysSinceLast, 2);
+  assert.ok(a.perWeek > 3 && a.perWeek < 3.5, String(a.perWeek)); // 11 intervalos em ~24 dias
+  const r = runIgChecks(a);
+  assert.equal(by(r, 'I3').status, 'ok');
+  assert.equal(by(r, 'I4').status, 'ok');
+});
+
+test('frequência: datas faltantes são completadas por outra fonte e, sem datas, o motivo é explicado', () => {
+  const f = parseFeedApi(feedFixture());
+  const semData = f.posts.map((p) => ({ ...p, ts: null }));
+  const filled = fillDates(semData, f.posts);
+  assert.equal(filled.filter((p) => p.ts).length, 12);
+  assert.deepEqual(fillDates(semData, []).filter((p) => p.ts), []);
+  const a = analyzeIg({ followers: 1000, bioLinkState: 'yes' }, semData, Date.now());
+  const r = runIgChecks(a);
+  assert.equal(by(r, 'I3').status, 'na');
+  assert.match(by(r, 'I3').found, /só 0 de 12 posts trouxeram a data/);
+  assert.match(by(r, 'I4').found, /0 de 12 posts com data/);
+});
+
+test('frequência: posts todos no mesmo dia não dividem por zero', () => {
+  const t = Date.now();
+  const a = analyzeIg({ followers: 1000 }, [post(0, 1, 1), { ...post(0, 1, 1), ts: t - 3600000 }, { ...post(0, 1, 1), ts: t - 7200000 }], t);
+  assert.ok(Number.isFinite(a.perWeek) && a.perWeek > 0);
+});
+
+test('frequência: o item concorda com o número mostrado (2,97 aparece como 3,0 e passa)', () => {
+  const t = 1e12, day = 86400000;
+  // 11 intervalos em 25,9 dias = 2,97 por semana
+  const posts = Array.from({ length: 12 }, (_, i) => ({ url: 'u', isReel: false, likes: 1, comments: 1, ts: t - (i * (25.9 / 11)) * day }));
+  const a = analyzeIg({ followers: 1000, bioLinkState: 'yes' }, posts, t);
+  assert.ok(a.perWeek < 3 && a.perWeek > 2.9, String(a.perWeek));
+  const i3 = by(runIgChecks(a), 'I3');
+  assert.match(i3.found, /3,0 posts por semana/);
+  assert.equal(i3.status, 'ok');
 });

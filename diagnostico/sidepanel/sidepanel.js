@@ -4,7 +4,7 @@ import { LEVEL_LABEL, SITE_TYPES, SPEED_LIMITS, detectSiteType, fmtSeconds, main
 import { fetchPageSpeed } from '../lib/pagespeed.js';
 import { teamConfig } from '../lib/team.js';
 import { CONTEXTS, detectContext } from '../lib/contexts.js';
-import { analyzeIg, bioLinkState, collectInstagram, engagementBenchmark, parsePostHtml, parseProfileApi, runIgChecks } from '../lib/instagram.js';
+import { analyzeIg, bioLinkState, collectInstagram, engagementBenchmark, fillDates, parseFeedApi, parsePostHtml, parseProfileApi, runIgChecks } from '../lib/instagram.js';
 import { adCopies, analyzeAds, collectAdLibrary, runAdChecks } from '../lib/adlibrary.js';
 import { PROVIDERS, buildMessages, generateSummary, listModels, loadAi, resolveAi, saveAi } from '../lib/ai.js';
 import { fileStem, speedSentence, toMarkdown, toShortText } from '../lib/report.js';
@@ -97,18 +97,35 @@ async function runInstagram(tab) {
   showState('Lendo o perfil do Instagram…', 'Leva cerca de 10 a 20 segundos. Mantenha a aba aberta.');
   const profile = await runIn(tab, collectInstagram);
   if (!profile?.isProfile) { const e = new Error('Abra o perfil que quer analisar (instagram.com/nome-do-perfil) e clique em Reanalisar.'); e.title = 'Abra um perfil do Instagram'; throw e; }
-  // Fonte principal: API interna do perfil (dados exatos). Reserva: leitura da página e de cada post.
-  let api = null;
-  try {
-    const res = await runIn(tab, async (h) => {
-      const r = await fetch(`/api/v1/users/web_profile_info/?username=${encodeURIComponent(h)}`, { credentials: 'include', headers: { 'x-ig-app-id': '936619743392459' } });
+  // Fontes: API do perfil (bio, seguidores, link na bio) e feed do perfil (data, curtidas e comentários por post, com paginação).
+  // Reserva: leitura da página e de cada post.
+  const getJson = async (path) => {
+    const res = await runIn(tab, async (u) => {
+      const r = await fetch(u, { credentials: 'include', headers: { 'x-ig-app-id': '936619743392459' } });
       return { status: r.status, text: (await r.text()).slice(0, 3000000) };
-    }, [profile.handle]);
-    if (res?.status === 200) api = parseProfileApi(JSON.parse(res.text));
-  } catch { /* usa a reserva */ }
+    }, [path]);
+    return res?.status === 200 ? JSON.parse(res.text) : null;
+  };
+  let api = null;
+  try { api = parseProfileApi(await getJson(`/api/v1/users/web_profile_info/?username=${encodeURIComponent(profile.handle)}`)); } catch { /* usa a reserva */ }
   if (profile.isPrivate || api?.isPrivate) { const e = new Error('Este perfil é privado: não dá para ler os posts.'); e.title = 'Perfil privado'; throw e; }
-  let posts = api?.posts || [];
+  let feedPosts = [];
+  try {
+    let maxId = '';
+    for (let page = 0; page < 2; page++) { // 2 páginas de 12: amostra maior melhora a estimativa de frequência
+      showState('Lendo o perfil do Instagram…', `Lendo os posts recentes (${page + 1} de 2). Mantenha a aba aberta.`);
+      const feed = parseFeedApi(await getJson(`/api/v1/feed/user/${encodeURIComponent(profile.handle)}/username/?count=12${maxId ? `&max_id=${encodeURIComponent(maxId)}` : ''}`));
+      if (!feed) break;
+      feedPosts.push(...feed.posts);
+      if (!feed.more || !feed.nextMaxId) break;
+      maxId = feed.nextMaxId;
+      await sleep(500);
+    }
+  } catch { /* usa a reserva */ }
+  let posts = feedPosts.length ? fillDates(feedPosts, api?.posts) : (api?.posts || []);
+  let source = feedPosts.length ? 'feed do Instagram' : api?.posts?.length ? 'API do perfil do Instagram' : '';
   if (posts.length === 0) {
+    source = 'leitura da página';
     const links = profile.postLinks.slice(0, 12);
     for (let i = 0; i < links.length; i++) {
       showState('Lendo o perfil do Instagram…', `Lendo post ${i + 1} de ${links.length}. Mantenha a aba aberta.`);
@@ -141,7 +158,8 @@ async function runInstagram(tab) {
     };
   }
   const content = { bio: api?.bio ?? profile.headerText, links: api?.links || [], posts };
-  const notes = posts.length === 0 ? 'Nenhum post pôde ser lido. Confirme que está logado no Instagram e role o perfil.' : !api ? 'Dados lidos da página (a API do Instagram não respondeu); alguns itens podem ficar sem verificar.' : '';
+  const datedN = posts.filter((p) => p.ts).length;
+  const notes = posts.length === 0 ? 'Nenhum post pôde ser lido. Confirme que está logado no Instagram e role o perfil.' : `Fonte dos posts: ${source}. ${posts.length} posts lidos, ${datedN} com data.${!api ? ' A API do perfil não respondeu (bio e link na bio podem ficar sem confirmar).' : ''}`;
   return { data, results, key: data.host, content, big, historyText: a.engagementPct == null ? null : `${fmtPct(a.engagementPct)}%`, notes };
 }
 

@@ -78,6 +78,45 @@ export function parseProfileText(text) {
   };
 }
 
+/** Data em ms a partir de segundos, milissegundos ou texto ISO (a API varia de campo e de formato). */
+export function toMs(v) {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  if (Number.isFinite(n) && n > 0) return n < 1e11 ? n * 1000 : n;
+  const d = Date.parse(v);
+  return Number.isNaN(d) ? null : d;
+}
+
+/**
+ * Lê uma página do feed do perfil (/api/v1/feed/user/<perfil>/username/): fonte estável de data, curtidas,
+ * comentários e legenda por post, com paginação. Devolve null se o JSON não tiver o formato esperado.
+ */
+export function parseFeedApi(json) {
+  if (!Array.isArray(json?.items)) return null;
+  const posts = json.items
+    .filter((it) => it && it.code && !(Array.isArray(it.timeline_pinned_user_ids) && it.timeline_pinned_user_ids.length) && !it.is_pinned) // fixados distorcem a frequência
+    .map((it) => {
+      const isReel = it.product_type === 'clips';
+      const hidden = it.like_and_view_counts_disabled || typeof it.like_count !== 'number' || it.like_count < 0;
+      return {
+        url: `https://www.instagram.com/${isReel ? 'reel' : 'p'}/${it.code}/`,
+        isReel,
+        likes: hidden ? null : it.like_count,
+        comments: it.comment_count ?? 0,
+        ts: toMs(it.taken_at ?? it.taken_at_timestamp),
+        caption: String(it.caption?.text || '').slice(0, 300),
+      };
+    });
+  return { posts, more: !!json.more_available, nextMaxId: json.next_max_id ? String(json.next_max_id) : '' };
+}
+
+/** Completa a data dos posts que vieram sem ela usando outra lista do mesmo perfil (casa pelo código do post). */
+export function fillDates(posts, others) {
+  const code = (u) => (String(u).match(/\/(?:p|reel)\/([\w-]+)/) || [])[1];
+  const byCode = new Map((others || []).filter((p) => p.ts).map((p) => [code(p.url), p.ts]));
+  return posts.map((p) => (p.ts ? p : { ...p, ts: byCode.get(code(p.url)) ?? null }));
+}
+
 /**
  * Lê a resposta da API interna do perfil (/api/v1/users/web_profile_info/): fonte exata de seguidores,
  * bio, link na bio e dos posts recentes. Devolve null se o JSON não tiver o formato esperado.
@@ -98,7 +137,7 @@ export function parseProfileApi(json) {
         isReel,
         likes: hidden ? null : n.edge_liked_by.count,
         comments: n.edge_media_to_comment?.count ?? 0,
-        ts: n.taken_at_timestamp ? n.taken_at_timestamp * 1000 : null,
+        ts: toMs(n.taken_at_timestamp ?? n.taken_at),
         caption: String(n.edge_media_to_caption?.edges?.[0]?.node?.text || '').slice(0, 300),
       };
     });
@@ -156,10 +195,10 @@ export function analyzeIg(profile, posts, now = Date.now()) {
   const spanDays = dated.length >= 2 ? (dated[dated.length - 1].ts - dated[0].ts) / DAY : null;
   return {
     followers, postsCount: profile.postsCount ?? fromDom.posts ?? fromOg.posts ?? null,
-    sampled: posts.length, likesHidden: posts.length > 0 && withLikes.length === 0,
+    sampled: posts.length, datedCount: dated.length, likesHidden: posts.length > 0 && withLikes.length === 0,
     engagementPct: followers && avgInteractions != null ? (avgInteractions / followers) * 100 : null,
     avgComments: posts.length ? posts.reduce((s, p) => s + (p.comments ?? 0), 0) / posts.length : null,
-    perWeek: spanDays ? ((dated.length - 1) / spanDays) * 7 : null,
+    perWeek: dated.length >= 2 ? ((dated.length - 1) / Math.max(spanDays, 1)) * 7 : null,
     daysSinceLast: dated.length ? Math.floor((now - dated[dated.length - 1].ts) / DAY) : null,
     reelShare: posts.length ? posts.filter((p) => p.isReel).length / posts.length : null,
     bioLink: profile.bioLinkState ?? (profile.bioLink ? 'yes' : 'unknown'),
@@ -212,9 +251,10 @@ export const IG_CHECKS = [
     cost: "Perfis que postam pouco perdem alcance e passam imagem de empresa parada.",
     fix: "Montar um calendário semanal com 3 ou mais posts por semana.",
     run: (a) => {
-      if (a.perWeek == null) return na('Poucos posts com data para calcular a frequência.');
-      const t = `Cerca de ${fmtPct(a.perWeek)} posts por semana (ideal: 3 ou mais).`;
-      return a.perWeek >= 3 ? ok(t) : a.perWeek >= 1 ? warn(t) : bad(t);
+      if (a.perWeek == null) return na(`Não foi possível calcular a frequência: só ${a.datedCount} de ${a.sampled} posts trouxeram a data.`);
+      const w = Math.round(a.perWeek * 10) / 10; // o limite usa o mesmo valor que aparece na tela
+      const t = `Cerca de ${fmtPct(w)} posts por semana (ideal: 3 ou mais).`;
+      return w >= 3 ? ok(t) : w >= 1 ? warn(t) : bad(t);
     },
   },
   {
@@ -223,7 +263,7 @@ export const IG_CHECKS = [
     cost: "Um perfil sem post recente parece abandonado, e quem pesquisa a empresa antes de comprar desconfia.",
     fix: "Voltar a um ritmo fixo de publicação, retomando com um post de bastidores.",
     run: (a) => {
-      if (a.daysSinceLast == null) return na('Não foi possível ler a data do último post.');
+      if (a.daysSinceLast == null) return na(`Não foi possível ler a data do último post (${a.datedCount} de ${a.sampled} posts com data).`);
       const t = a.daysSinceLast === 0 ? 'O último post foi hoje.' : `O último post foi há ${a.daysSinceLast} dia(s).`;
       return a.daysSinceLast <= 7 ? ok(t) : a.daysSinceLast <= 30 ? warn(t) : bad(t);
     },
